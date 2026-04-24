@@ -1,5 +1,5 @@
 {
-  "name": "open-telemetry/opentelemetry-auto-magento2",
+  "name": "jerrytfleung/opentelemetry-auto-magento2",
   "description": "OpenTelemetry auto-instrumentation for Magento2",
   "keywords": ["opentelemetry", "otel", "open-telemetry", "tracing", "magento2", "instrumentation"],
   "type": "library",
