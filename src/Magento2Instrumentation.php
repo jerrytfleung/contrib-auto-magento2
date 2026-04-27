@@ -97,6 +97,8 @@ final class Magento2Instrumentation
                     $span->end();
                 }
             );
+        } else {
+            self::logInfo('Nothing hooked');
         }
     }
 }
