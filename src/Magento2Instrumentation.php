@@ -30,8 +30,8 @@ final class Magento2Instrumentation
             'https://opentelemetry.io/schemas/1.32.0',
         );
 
-        if (class_exists(\Magento\Framework\App\FrontController::class)) {
-            self::logInfo('Front controller class exists, registering hooks');
+        if (class_exists(\Magento\Framework\App\FrontController::class) && interface_exists(\Magento\Framework\App\ResponseInterface::class)) {
+            self::logInfo('Front controller class and ResponseInterface exists, registering hooks');
             /** @psalm-suppress UndefinedClass */
             hook(
                 \Magento\Framework\App\FrontController::class,
@@ -86,7 +86,6 @@ final class Magento2Instrumentation
                 },
                 /** @psalm-suppress UndefinedClass */
                 post: static function (\Magento\Framework\App\FrontController $frontController, array $params, \Magento\Framework\App\ResponseInterface $response, ?Throwable $exception) {
-                    self::logInfo('Front controller post hook');
                     $scope = Context::storage()->scope();
                     if (!$scope) {
                         self::logInfo('Front controller empty scope');
@@ -98,36 +97,38 @@ final class Magento2Instrumentation
                 }
             );
         } else {
-            self::logInfo('Nothing hooked');
+            self::logInfo('Nothing hooked. FrontController class or ResponseInterface interface not exists');
         }
 
-        hook(
-            \Magento\Framework\App\Http::class,
-            'launch',
-            /** @psalm-suppress UndefinedClass */
-            pre: static function (\Magento\Framework\App\Http $http, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                self::logInfo('Magento http pre hook');
-                $builder = $instrumentation->tracer()
-                    ->spanBuilder('launch')
-                    ->setSpanKind(SpanKind::KIND_SERVER)
-                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
-                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
-                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
-                $parent = Context::getCurrent();
-                $span = $builder->startSpan();
-                Context::storage()->attach($span->storeInContext($parent));
-            },
-            /** @psalm-suppress UndefinedClass */
-            post: static function (\Magento\Framework\App\Http $http, array $params, \Magento\Framework\App\Response\Http $response, ?Throwable $exception) {
-                self::logInfo('Magento http post hook');
-                $scope = Context::storage()->scope();
-                if (!$scope) {
-                    return;
-                }
-                $scope->detach();
-                $span = Span::fromContext($scope->context());
-                $span->end();
-            }
-        );
+//        if (class_exists(\Magento\Framework\App\Http::class) && class_exists( \Magento\Framework\App\Response\Http::class)) {
+//            hook(
+//                \Magento\Framework\App\Http::class,
+//                'launch',
+//                /** @psalm-suppress UndefinedClass */
+//                pre: static function (\Magento\Framework\App\Http $http, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+//                    $builder = $instrumentation->tracer()
+//                        ->spanBuilder('launch')
+//                        ->setSpanKind(SpanKind::KIND_SERVER)
+//                        ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
+//                        ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
+//                        ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
+//                    $parent = Context::getCurrent();
+//                    $span = $builder->startSpan();
+//                    Context::storage()->attach($span->storeInContext($parent));
+//                },
+//                /** @psalm-suppress UndefinedClass */
+//                post: static function (\Magento\Framework\App\Http $http, array $params, \Magento\Framework\App\Response\Http $response, ?Throwable $exception) {
+//                    $scope = Context::storage()->scope();
+//                    if (!$scope) {
+//                        return;
+//                    }
+//                    $scope->detach();
+//                    $span = Span::fromContext($scope->context());
+//                    $span->end();
+//                }
+//            );
+//        } else {
+//            self::logInfo('Nothing hooked. Http class or Http Response class not exists');
+//        }
     }
 }
