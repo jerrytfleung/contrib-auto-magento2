@@ -30,7 +30,7 @@ final class Magento2Instrumentation
             'https://opentelemetry.io/schemas/1.32.0',
         );
 
-        if (class_exists(\Magento\Framework\App\FrontController::class) && class_exists(\Magento\Framework\App\ResponseInterface::class)) {
+        if (class_exists(\Magento\Framework\App\FrontController::class)) {
             self::logInfo('Front controller class exists, registering hooks');
             /** @psalm-suppress UndefinedClass */
             hook(
