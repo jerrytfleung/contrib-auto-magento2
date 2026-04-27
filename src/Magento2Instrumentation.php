@@ -30,14 +30,14 @@ final class Magento2Instrumentation
             'https://opentelemetry.io/schemas/1.32.0',
         );
 
-        if (class_exists(\Magento\Framework\App\FrontController::class) && interface_exists(\Magento\Framework\App\ResponseInterface::class)) {
+        if (interface_exists(\Magento\Framework\App\FrontControllerInterface::class) && interface_exists(\Magento\Framework\App\ResponseInterface::class)) {
             self::logInfo('Front controller class and ResponseInterface exists, registering hooks');
             /** @psalm-suppress UndefinedClass */
             hook(
-                \Magento\Framework\App\FrontController::class,
+                \Magento\Framework\App\FrontControllerInterface::class,
                 'dispatch',
                 /** @psalm-suppress UndefinedClass */
-                pre: static function (\Magento\Framework\App\FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+                pre: static function (\Magento\Framework\App\FrontControllerInterface $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                     self::logInfo('Front controller pre hook');
                     if (interface_exists(\Magento\Framework\App\RequestInterface::class)) {
                         self::logInfo('Request interface exists, adding attributes');
@@ -85,7 +85,7 @@ final class Magento2Instrumentation
                     }
                 },
                 /** @psalm-suppress UndefinedClass */
-                post: static function (\Magento\Framework\App\FrontController $frontController, array $params, \Magento\Framework\App\ResponseInterface $response, ?Throwable $exception) {
+                post: static function (\Magento\Framework\App\FrontControllerInterface $frontController, array $params, \Magento\Framework\App\ResponseInterface $response, ?Throwable $exception) {
                     $scope = Context::storage()->scope();
                     if (!$scope) {
                         self::logInfo('Front controller empty scope');
