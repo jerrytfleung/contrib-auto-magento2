@@ -37,8 +37,15 @@ final class Magento2Instrumentation
                 /** @psalm-suppress UndefinedClass */
                 pre: static function (\Magento\Framework\App\FrontControllerInterface $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                     if (interface_exists(\Magento\Framework\App\RequestInterface::class)) {
-
-                        $requestInterface = $params[0];
+                        $requestInterface = ($params[0] instanceof \Magento\Framework\App\RequestInterface) ? $params[0] : null;
+                        self::logInfo($requestInterface?->getModuleName() ?? 'Unknown module');
+                        self::logInfo($requestInterface?->getActionName() ?? 'Unknown action');
+                        $params = $requestInterface?->getParams();
+                        self::logInfo(implode(',', array_map(
+                            fn ($k, $v) => "$k=$v",
+                            array_keys($params ?? []),
+                            $params
+                        )));
 
                         //
                         //                        $moduleName = 'unknown';
@@ -51,7 +58,7 @@ final class Magento2Instrumentation
                         //                        }
 
                         $builder = $instrumentation->tracer()
-                            ->spanBuilder($requestInterface ? $requestInterface->getModuleName() . ':' . $requestInterface->getActionName() : 'unknown')
+                            ->spanBuilder('dispatch')
                             ->setSpanKind(SpanKind::KIND_SERVER)
                             ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                             ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
