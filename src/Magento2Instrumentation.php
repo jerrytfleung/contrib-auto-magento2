@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OpenTelemetry\Contrib\Instrumentation\Magento2;
 
+use OpenTelemetry\API\Behavior\LogsMessagesTrait;
 use OpenTelemetry\API\Instrumentation\CachedInstrumentation;
 use OpenTelemetry\API\Trace\Span;
 use OpenTelemetry\API\Trace\SpanKind;
@@ -16,10 +17,13 @@ use Throwable;
 // @phan-file-suppress PhanUndeclaredTypeParameter
 final class Magento2Instrumentation
 {
+    use LogsMessagesTrait;
+
     public const NAME = 'magento2';
 
     public static function register(): void
     {
+        self::logInfo('Magento2Instrumentation::register');
         $instrumentation = new CachedInstrumentation(
             'io.opentelemetry.contrib.php.magento2',
             null,
@@ -27,13 +31,16 @@ final class Magento2Instrumentation
         );
 
         if (class_exists(\Magento\Framework\App\FrontController::class) && class_exists(\Magento\Framework\App\ResponseInterface::class)) {
+            self::logInfo('Front controller class exists, registering hooks');
             /** @psalm-suppress UndefinedClass */
             hook(
                 \Magento\Framework\App\FrontController::class,
                 'dispatch',
                 /** @psalm-suppress UndefinedClass */
                 pre: static function (\Magento\Framework\App\FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+                    self::logInfo('Front controller pre hook');
                     if (interface_exists(\Magento\Framework\App\RequestInterface::class)) {
+                        self::logInfo('Request interface exists, adding attributes');
                         //                        $requestInterface = null;
                         //                        if (isset($params[0]) && is_a($params[0], \Magento\Framework\App\RequestInterface::class)) {
                         //                            $requestInterface = $params[0];
@@ -73,12 +80,16 @@ final class Magento2Instrumentation
                         $span = $builder->startSpan();
                         // }
                         Context::storage()->attach($span->storeInContext($parent));
+                    } else {
+                        self::logInfo('Request interface not exists');
                     }
                 },
                 /** @psalm-suppress UndefinedClass */
                 post: static function (\Magento\Framework\App\FrontController $frontController, array $params, \Magento\Framework\App\ResponseInterface $response, ?Throwable $exception) {
+                    self::logInfo('Front controller post hook');
                     $scope = Context::storage()->scope();
                     if (!$scope) {
+                        self::logInfo('Front controller empty scope');
                         return;
                     }
                     $scope->detach();
