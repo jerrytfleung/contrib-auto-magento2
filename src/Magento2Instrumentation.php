@@ -23,7 +23,6 @@ final class Magento2Instrumentation
 
     public static function register(): void
     {
-        self::logInfo('Magento2Instrumentation::register');
         $instrumentation = new CachedInstrumentation(
             'io.opentelemetry.contrib.php.magento2',
             null,
@@ -31,20 +30,16 @@ final class Magento2Instrumentation
         );
 
         if (interface_exists(\Magento\Framework\App\FrontControllerInterface::class) && interface_exists(\Magento\Framework\App\ResponseInterface::class)) {
-            self::logInfo('Front controller class and ResponseInterface exists, registering hooks');
             /** @psalm-suppress UndefinedClass */
             hook(
                 \Magento\Framework\App\FrontControllerInterface::class,
                 'dispatch',
                 /** @psalm-suppress UndefinedClass */
                 pre: static function (\Magento\Framework\App\FrontControllerInterface $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                    self::logInfo('Front controller pre hook');
                     if (interface_exists(\Magento\Framework\App\RequestInterface::class)) {
-                        self::logInfo('Request interface exists, adding attributes');
-                        //                        $requestInterface = null;
-                        //                        if (isset($params[0]) && is_a($params[0], \Magento\Framework\App\RequestInterface::class)) {
-                        //                            $requestInterface = $params[0];
-                        //                        }
+
+                        $requestInterface = $params[0];
+
                         //
                         //                        $moduleName = 'unknown';
                         //                        if (is_object($requestInterface) && method_exists($requestInterface, 'getModuleName')) {
@@ -56,7 +51,7 @@ final class Magento2Instrumentation
                         //                        }
 
                         $builder = $instrumentation->tracer()
-                            ->spanBuilder('dispatch')
+                            ->spanBuilder($requestInterface ? $requestInterface->getModuleName() . ':' . $requestInterface->getActionName() : 'unknown')
                             ->setSpanKind(SpanKind::KIND_SERVER)
                             ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                             ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
@@ -88,7 +83,6 @@ final class Magento2Instrumentation
                 post: static function (\Magento\Framework\App\FrontControllerInterface $frontController, array $params, \Magento\Framework\App\ResponseInterface $response, ?Throwable $exception) {
                     $scope = Context::storage()->scope();
                     if (!$scope) {
-                        self::logInfo('Front controller empty scope');
                         return;
                     }
                     $scope->detach();
@@ -96,11 +90,9 @@ final class Magento2Instrumentation
                     $span->end();
                 }
             );
-        } else {
-            self::logInfo('Nothing hooked. FrontController class or ResponseInterface interface not exists');
         }
 
-//        if (class_exists(\Magento\Framework\App\Http::class) && class_exists( \Magento\Framework\App\Response\Http::class)) {
+//        if (class_exists(\Magento\Framework\App\FrontController::class) && class_exists( \Magento\Framework\App\Response\Http::class)) {
 //            hook(
 //                \Magento\Framework\App\Http::class,
 //                'launch',
