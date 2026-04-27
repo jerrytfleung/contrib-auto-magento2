@@ -100,5 +100,34 @@ final class Magento2Instrumentation
         } else {
             self::logInfo('Nothing hooked');
         }
+
+        hook(
+            \Magento\Framework\App\Http::class,
+            'launch',
+            /** @psalm-suppress UndefinedClass */
+            pre: static function (\Magento\Framework\App\Http $http, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+                self::logInfo('Magento http pre hook');
+                $builder = $instrumentation->tracer()
+                    ->spanBuilder('launch')
+                    ->setSpanKind(SpanKind::KIND_SERVER)
+                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
+                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
+                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
+                $parent = Context::getCurrent();
+                $span = $builder->startSpan();
+                Context::storage()->attach($span->storeInContext($parent));
+            },
+            /** @psalm-suppress UndefinedClass */
+            post: static function (\Magento\Framework\App\Http $http, array $params, \Magento\Framework\App\Response\Http $response, ?Throwable $exception) {
+                self::logInfo('Magento http post hook');
+                $scope = Context::storage()->scope();
+                if (!$scope) {
+                    return;
+                }
+                $scope->detach();
+                $span = Span::fromContext($scope->context());
+                $span->end();
+            }
+        );
     }
 }
