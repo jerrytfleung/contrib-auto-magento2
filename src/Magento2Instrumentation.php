@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OpenTelemetry\Contrib\Instrumentation\Magento2;
 
 use Magento\Framework\App\FrontController;
+use Magento\Framework\App\Http;
 use Magento\Framework\App\RequestInterface;
 use Magento\Framework\App\ResponseInterface;
 use OpenTelemetry\API\Behavior\LogsMessagesTrait;
@@ -30,6 +31,28 @@ final class Magento2Instrumentation
             'io.opentelemetry.contrib.php.magento2',
             null,
             'https://opentelemetry.io/schemas/1.32.0',
+        );
+
+        hook(Http::class,
+        'launch',
+            pre: static function (Http $http, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+                $builder = $instrumentation->tracer()
+                    ->spanBuilder('launch')
+                    ->setSpanKind(SpanKind::KIND_SERVER)
+                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
+                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
+                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
+                $parent = Context::getCurrent();
+                $span = $builder->startSpan();
+                Context::storage()->attach($span->storeInContext($parent));
+            },
+            post: static function (Http $http, array $params, ResponseInterface $response, ?Throwable $exception) {
+                $scope = Context::storage()->scope();
+                if (!$scope) {
+                    return;
+                }
+                $scope->detach();
+            }
         );
 
         /** @psalm-suppress UndefinedClass */
@@ -60,7 +83,6 @@ final class Magento2Instrumentation
 
                 $builder = $instrumentation->tracer()
                     ->spanBuilder('dispatch')
-                    ->setSpanKind(SpanKind::KIND_SERVER)
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
