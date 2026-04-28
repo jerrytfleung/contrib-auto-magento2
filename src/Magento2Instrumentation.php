@@ -85,7 +85,7 @@ final class Magento2Instrumentation
                 Context::storage()->attach($span->storeInContext($parent));
             },
             /** @psalm-suppress UndefinedClass */
-            post: static function (FrontControllerInterface $frontController, array $params, ResponseInterface $response, ?Throwable $exception) {
+            post: static function (FrontController $frontController, array $params, ResponseInterface $response, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
