@@ -12,6 +12,7 @@ use OpenTelemetry\API\Behavior\LogsMessagesTrait;
 use OpenTelemetry\API\Instrumentation\CachedInstrumentation;
 use OpenTelemetry\API\Trace\Span;
 use OpenTelemetry\API\Trace\SpanKind;
+use OpenTelemetry\API\Trace\StatusCode;
 use OpenTelemetry\Context\Context;
 use function OpenTelemetry\Instrumentation\hook;
 use OpenTelemetry\SemConv\Attributes\CodeAttributes;
@@ -33,8 +34,9 @@ final class Magento2Instrumentation
             'https://opentelemetry.io/schemas/1.32.0',
         );
 
-        hook(Http::class,
-        'launch',
+        hook(
+            Http::class,
+            'launch',
             pre: static function (Http $http, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $builder = $instrumentation->tracer()
                     ->spanBuilder('launch')
@@ -46,12 +48,18 @@ final class Magento2Instrumentation
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext($parent));
             },
-            post: static function (Http $http, array $params, ResponseInterface $response, ?Throwable $exception) {
+            post: static function (Http $http, array $params, ?ResponseInterface $response, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
                 }
                 $scope->detach();
+                $span = Span::fromContext($scope->context());
+                if ($exception) {
+                    $span->recordException($exception);
+                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
+                }
+                $span->end();
             }
         );
 
@@ -114,6 +122,10 @@ final class Magento2Instrumentation
                 }
                 $scope->detach();
                 $span = Span::fromContext($scope->context());
+                if ($exception) {
+                    $span->recordException($exception);
+                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
+                }
                 $span->end();
             }
         );
