@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace OpenTelemetry\Contrib\Instrumentation\Magento2;
 
-use Magento\Framework\App\FrontControllerInterface;
+use Magento\Framework\App\FrontController;
 use Magento\Framework\App\RequestInterface;
 use Magento\Framework\App\ResponseInterface;
 use OpenTelemetry\API\Behavior\LogsMessagesTrait;
@@ -34,10 +34,10 @@ final class Magento2Instrumentation
 
         /** @psalm-suppress UndefinedClass */
         hook(
-            FrontControllerInterface::class,
+            FrontController::class,
             'dispatch',
             /** @psalm-suppress UndefinedClass */
-            pre: static function (FrontControllerInterface $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+            pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $requestInterface = ($params[0] instanceof RequestInterface) ? $params[0] : null;
                 self::logInfo($requestInterface?->getModuleName() ?? 'Unknown module');
                 self::logInfo($requestInterface?->getActionName() ?? 'Unknown action');
