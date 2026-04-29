@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace OpenTelemetry\Contrib\Instrumentation\Magento2;
 
-use Magento\Catalog\Block\Adminhtml\Product\Attribute\Edit\Tab\Front;
 use Magento\Framework\App\ActionInterface;
 use Magento\Framework\App\FrontController;
 use Magento\Framework\App\Http;
@@ -202,7 +201,7 @@ final class Magento2Instrumentation
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext($parent));
             },
-            post: static function (ActionInterface $actionInterface, array $params, ResponseInterface|ResultInterface $response, ?Throwable $exception) {
+            post: static function (ActionInterface $actionInterface, array $params, ResultInterface|ResponseInterface $response, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
