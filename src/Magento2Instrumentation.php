@@ -188,32 +188,32 @@ final class Magento2Instrumentation
             }
         );
 
-        hook(
-            ActionInterface::class,
-            'execute',
-            pre: static function (ActionInterface $actionInterface, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $builder = $instrumentation->tracer()
-                    ->spanBuilder('execute')
-                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
-                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
-                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
-                $parent = Context::getCurrent();
-                $span = $builder->startSpan();
-                Context::storage()->attach($span->storeInContext($parent));
-            },
-            post: static function (ActionInterface $actionInterface, array $params, ResultInterface|ResponseInterface $response, ?Throwable $exception) {
-                $scope = Context::storage()->scope();
-                if (!$scope) {
-                    return;
-                }
-                $scope->detach();
-                $span = Span::fromContext($scope->context());
-                if ($exception) {
-                    $span->recordException($exception);
-                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
-                }
-                $span->end();
-            }
-        );
+//        hook(
+//            ActionInterface::class,
+//            'execute',
+//            pre: static function (ActionInterface $actionInterface, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+//                $builder = $instrumentation->tracer()
+//                    ->spanBuilder('execute')
+//                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
+//                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
+//                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
+//                $parent = Context::getCurrent();
+//                $span = $builder->startSpan();
+//                Context::storage()->attach($span->storeInContext($parent));
+//            },
+//            post: static function (ActionInterface $actionInterface, array $params, ResultInterface|ResponseInterface $response, ?Throwable $exception) {
+//                $scope = Context::storage()->scope();
+//                if (!$scope) {
+//                    return;
+//                }
+//                $scope->detach();
+//                $span = Span::fromContext($scope->context());
+//                if ($exception) {
+//                    $span->recordException($exception);
+//                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
+//                }
+//                $span->end();
+//            }
+//        );
     }
 }
