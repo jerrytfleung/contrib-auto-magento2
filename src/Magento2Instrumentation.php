@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace OpenTelemetry\Contrib\Instrumentation\Magento2;
 
+use Magento\Framework\App\Action\AbstractAction;
 use Magento\Framework\App\ActionInterface;
+use Magento\Framework\App\AreaList;
 use Magento\Framework\App\FrontController;
 use Magento\Framework\App\Http;
 use Magento\Framework\App\RequestInterface;
@@ -60,6 +62,35 @@ final class Magento2Instrumentation
                 if ($exception) {
                     $span->recordException($exception);
                     $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
+                }
+                $span->end();
+            }
+        );
+
+        hook(
+            AreaList::class,
+            'getCodeByFrontName',
+            pre: static function (AreaList $areaList, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+                $frontName = is_string($params[0]) ? $params[0] : 'unknown';
+                $builder = $instrumentation->tracer()
+                    ->spanBuilder('getCodeByFrontName')
+                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
+                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
+                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
+                    ->setAttribute(Magento2Attributes::MAGENTO2_FRONT_NAME, $frontName);
+                $parent = Context::getCurrent();
+                $span = $builder->startSpan();
+                Context::storage()->attach($span->storeInContext($parent));
+            },
+            post: static function (AreaList $areaList, array $params, ?string $areaCode) {
+                $scope = Context::storage()->scope();
+                if (!$scope) {
+                    return;
+                }
+                $scope->detach();
+                $span = Span::fromContext($scope->context());
+                if ($areaCode) {
+                    $span->setAttribute(Magento2Attributes::MAGENTO2_AREA_CODE, $areaCode);
                 }
                 $span->end();
             }
@@ -189,7 +220,7 @@ final class Magento2Instrumentation
         );
 
 //        hook(
-//            ActionInterface::class,
+//            AbstractAction::class,
 //            'execute',
 //            pre: static function (ActionInterface $actionInterface, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
 //                $builder = $instrumentation->tracer()
