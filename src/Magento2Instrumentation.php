@@ -4,20 +4,23 @@ declare(strict_types=1);
 
 namespace OpenTelemetry\Contrib\Instrumentation\Magento2;
 
-use Magento\Framework\App\Action\AbstractAction;
-use Magento\Framework\App\ActionInterface;
+use Http\Discovery\Psr17Factory;
 use Magento\Framework\App\AreaList;
+use Magento\Framework\App\Bootstrap;
 use Magento\Framework\App\FrontController;
 use Magento\Framework\App\Http;
 use Magento\Framework\App\RequestInterface;
 use Magento\Framework\App\ResponseInterface;
 use Magento\Framework\Controller\ResultInterface;
+use Nyholm\Psr7Server\ServerRequestCreator;
 use OpenTelemetry\API\Behavior\LogsMessagesTrait;
+use OpenTelemetry\API\Globals;
 use OpenTelemetry\API\Instrumentation\CachedInstrumentation;
 use OpenTelemetry\API\Trace\Span;
 use OpenTelemetry\API\Trace\SpanKind;
 use OpenTelemetry\API\Trace\StatusCode;
 use OpenTelemetry\Context\Context;
+use OpenTelemetry\SemConv\TraceAttributes;
 use function OpenTelemetry\Instrumentation\hook;
 use OpenTelemetry\SemConv\Attributes\CodeAttributes;
 use Throwable;
@@ -39,12 +42,48 @@ final class Magento2Instrumentation
         );
 
         hook(
+            Bootstrap::class,
+            'run',
+            pre: static function (Bootstrap $bootstrap, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+                $factory = new Psr17Factory();
+                $request = (new ServerRequestCreator($factory, $factory, $factory, $factory))->fromGlobals();
+                $parent = Globals::propagator()->extract($request->getHeaders());
+                $span = $instrumentation->tracer()
+                    ->spanBuilder('Bootstrap.run')
+                    ->setParent($parent)
+                    ->setSpanKind(SpanKind::KIND_SERVER)
+                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
+                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
+                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
+                    ->setAttribute(TraceAttributes::URL_FULL, (string) $request->getUri())
+                    ->setAttribute(TraceAttributes::URL_SCHEME, $request->getUri()->getScheme())
+                    ->setAttribute(TraceAttributes::URL_PATH, $request->getUri()->getPath())
+                    ->setAttribute(TraceAttributes::HTTP_REQUEST_METHOD, $request->getMethod())
+                    ->setAttribute(TraceAttributes::NETWORK_PROTOCOL_VERSION, $request->getProtocolVersion())
+                    ->setAttribute(TraceAttributes::USER_AGENT_ORIGINAL, $request->getHeaderLine('User-Agent'))
+                    ->setAttribute(TraceAttributes::HTTP_REQUEST_BODY_SIZE, $request->getHeaderLine('Content-Length'))
+                    ->setAttribute(TraceAttributes::CLIENT_ADDRESS, $request->getUri()->getHost())
+                    ->setAttribute(TraceAttributes::CLIENT_PORT, $request->getUri()->getPort())
+                    ->startSpan();
+                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
+            },
+            post: static function (Bootstrap $bootstrap, array $params) {
+                $scope = Context::storage()->scope();
+                if (!$scope) {
+                    return;
+                }
+                $scope->detach();
+                $span = Span::fromContext($scope->context());
+                $span->end();
+            }
+        );
+
+        hook(
             Http::class,
             'launch',
             pre: static function (Http $http, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $builder = $instrumentation->tracer()
                     ->spanBuilder('launch')
-                    ->setSpanKind(SpanKind::KIND_SERVER)
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
@@ -52,7 +91,7 @@ final class Magento2Instrumentation
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext($parent));
             },
-            post: static function (Http $http, array $params, ?ResponseInterface $response, ?Throwable $exception) {
+            post: static function (Http $http, array $params, ResponseInterface $response, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
@@ -96,135 +135,14 @@ final class Magento2Instrumentation
             }
         );
 
-        /** @psalm-suppress UndefinedClass */
-        hook(
-            FrontController::class,
-            'dispatch',
-            /** @psalm-suppress UndefinedClass */
-            pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $requestInterface = ($params[0] instanceof RequestInterface) ? $params[0] : null;
-                self::logInfo($requestInterface?->getModuleName() ?? 'Unknown module');
-                self::logInfo($requestInterface?->getActionName() ?? 'Unknown action');
-                $params = $requestInterface?->getParams() ?? [];
-                self::logInfo(implode(',', array_map(
-                    fn ($k, $v) => "$k=$v",
-                    array_keys($params),
-                    $params
-                )));
-
-                //
-                //                        $moduleName = 'unknown';
-                //                        if (is_object($requestInterface) && method_exists($requestInterface, 'getModuleName')) {
-                //                            /** @phan-suppress-next-line PhanUndeclaredClassMethod */
-                //                            $moduleNameValue = $requestInterface->getModuleName();
-                //                            if (is_string($moduleNameValue) && $moduleNameValue !== '') {
-                //                                $moduleName = $moduleNameValue;
-                //                            }
-                //                        }
-
-                $builder = $instrumentation->tracer()
-                    ->spanBuilder('dispatch')
-                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
-                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
-                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
-                $parent = Context::getCurrent();
-                //                        if ($requestInterface) {
-                //                            // $parent = Globals::propagator()->extract($requestInterface->getHeaders());
-                //                            $span = $builder
-                ////                                ->setParent($parent)
-                ////                                ->setAttribute(UrlAttributes::URL_FULL, $request->getUri()->__toString())
-                ////                                ->setAttribute(HttpAttributes::HTTP_REQUEST_METHOD, $request->getMethod())
-                ////                                ->setAttribute(HttpIncubatingAttributes::HTTP_REQUEST_BODY_SIZE, $request->getHeaderLine('Content-Length'))
-                ////                                ->setAttribute(UserAgentAttributes::USER_AGENT_ORIGINAL, $request->getHeaderLine('User-Agent'))
-                ////                                ->setAttribute(ServerAttributes::SERVER_ADDRESS, $request->getUri()->getHost())
-                ////                                ->setAttribute(ServerAttributes::SERVER_PORT, $request->getUri()->getPort())
-                ////                                ->setAttribute(UrlAttributes::URL_SCHEME, $request->getUri()->getScheme())
-                ////                                ->setAttribute(UrlAttributes::URL_PATH, $request->getUri()->getPath())
-                //                                ->startSpan();
-                //                            // $request = $request->withAttribute(SpanInterface::class, $span);
-                //                        } else {
-                $span = $builder->startSpan();
-                // }
-                Context::storage()->attach($span->storeInContext($parent));
-            },
-            /** @psalm-suppress UndefinedClass */
-            post: static function (FrontController $frontController, array $params, ResponseInterface $response, ?Throwable $exception) {
-                $scope = Context::storage()->scope();
-                if (!$scope) {
-                    return;
-                }
-                $scope->detach();
-                $span = Span::fromContext($scope->context());
-                if ($exception) {
-                    $span->recordException($exception);
-                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
-                }
-                $span->end();
-            }
-        );
-
-        hook(
-            FrontController::class,
-            'processRequest',
-            pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $builder = $instrumentation->tracer()
-                    ->spanBuilder('processRequest')
-                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
-                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
-                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
-                $parent = Context::getCurrent();
-                $span = $builder->startSpan();
-                Context::storage()->attach($span->storeInContext($parent));
-            },
-            post: static function (FrontController $frontController, array $params, ResponseInterface $response, ?Throwable $exception) {
-                $scope = Context::storage()->scope();
-                if (!$scope) {
-                    return;
-                }
-                $scope->detach();
-                $span = Span::fromContext($scope->context());
-                if ($exception) {
-                    $span->recordException($exception);
-                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
-                }
-                $span->end();
-            }
-        );
-
-        hook(
-            FrontController::class,
-            'getActionResponse',
-            pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $builder = $instrumentation->tracer()
-                    ->spanBuilder('getActionResponse')
-                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
-                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
-                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
-                $parent = Context::getCurrent();
-                $span = $builder->startSpan();
-                Context::storage()->attach($span->storeInContext($parent));
-            },
-            post: static function (FrontController $frontController, array $params, ResponseInterface|ResultInterface $response, ?Throwable $exception) {
-                $scope = Context::storage()->scope();
-                if (!$scope) {
-                    return;
-                }
-                $scope->detach();
-                $span = Span::fromContext($scope->context());
-                if ($exception) {
-                    $span->recordException($exception);
-                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
-                }
-                $span->end();
-            }
-        );
-
+//        /** @psalm-suppress UndefinedClass */
 //        hook(
-//            AbstractAction::class,
-//            'execute',
-//            pre: static function (ActionInterface $actionInterface, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+//            FrontController::class,
+//            'dispatch',
+//            /** @psalm-suppress UndefinedClass */
+//            pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
 //                $builder = $instrumentation->tracer()
-//                    ->spanBuilder('execute')
+//                    ->spanBuilder('dispatch')
 //                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
 //                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
 //                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
@@ -232,7 +150,64 @@ final class Magento2Instrumentation
 //                $span = $builder->startSpan();
 //                Context::storage()->attach($span->storeInContext($parent));
 //            },
-//            post: static function (ActionInterface $actionInterface, array $params, ResultInterface|ResponseInterface $response, ?Throwable $exception) {
+//            /** @psalm-suppress UndefinedClass */
+//            post: static function (FrontController $frontController, array $params, ResponseInterface|ResultInterface $response, ?Throwable $exception) {
+//                $scope = Context::storage()->scope();
+//                if (!$scope) {
+//                    return;
+//                }
+//                $scope->detach();
+//                $span = Span::fromContext($scope->context());
+//                if ($exception) {
+//                    $span->recordException($exception);
+//                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
+//                }
+//                $span->end();
+//            }
+//        );
+//
+//        hook(
+//            FrontController::class,
+//            'processRequest',
+//            pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+//                $builder = $instrumentation->tracer()
+//                    ->spanBuilder('processRequest')
+//                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
+//                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
+//                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
+//                $parent = Context::getCurrent();
+//                $span = $builder->startSpan();
+//                Context::storage()->attach($span->storeInContext($parent));
+//            },
+//            post: static function (FrontController $frontController, array $params, ResponseInterface $response, ?Throwable $exception) {
+//                $scope = Context::storage()->scope();
+//                if (!$scope) {
+//                    return;
+//                }
+//                $scope->detach();
+//                $span = Span::fromContext($scope->context());
+//                if ($exception) {
+//                    $span->recordException($exception);
+//                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
+//                }
+//                $span->end();
+//            }
+//        );
+//
+//        hook(
+//            FrontController::class,
+//            'getActionResponse',
+//            pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+//                $builder = $instrumentation->tracer()
+//                    ->spanBuilder('getActionResponse')
+//                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
+//                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
+//                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
+//                $parent = Context::getCurrent();
+//                $span = $builder->startSpan();
+//                Context::storage()->attach($span->storeInContext($parent));
+//            },
+//            post: static function (FrontController $frontController, array $params, ResponseInterface|ResultInterface $response, ?Throwable $exception) {
 //                $scope = Context::storage()->scope();
 //                if (!$scope) {
 //                    return;
