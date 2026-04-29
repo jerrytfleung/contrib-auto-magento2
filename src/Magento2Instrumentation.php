@@ -9,6 +9,7 @@ use Magento\Framework\App\AreaList;
 use Magento\Framework\App\Bootstrap;
 use Magento\Framework\App\FrontController;
 use Magento\Framework\App\Http;
+use Magento\Framework\App\RequestInterface;
 use Magento\Framework\App\ResponseInterface;
 use Magento\Framework\Controller\ResultInterface;
 use Nyholm\Psr7Server\ServerRequestCreator;
@@ -87,9 +88,8 @@ final class Magento2Instrumentation
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
-                $parent = Context::getCurrent();
                 $span = $builder->startSpan();
-                Context::storage()->attach($span->storeInContext($parent));
+                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
             post: static function (Http $http, array $params, ResponseInterface $response, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
@@ -117,9 +117,8 @@ final class Magento2Instrumentation
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
                     ->setAttribute(Magento2Attributes::MAGENTO2_FRONT_NAME, $frontName);
-                $parent = Context::getCurrent();
                 $span = $builder->startSpan();
-                Context::storage()->attach($span->storeInContext($parent));
+                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
             post: static function (AreaList $areaList, array $params, ?string $areaCode) {
                 $scope = Context::storage()->scope();
@@ -135,36 +134,38 @@ final class Magento2Instrumentation
             }
         );
 
-        //        /** @psalm-suppress UndefinedClass */
-        //        hook(
-        //            FrontController::class,
-        //            'dispatch',
-        //            /** @psalm-suppress UndefinedClass */
-        //            pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-        //                $builder = $instrumentation->tracer()
-        //                    ->spanBuilder('dispatch')
-        //                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
-        //                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
-        //                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
-        //                $parent = Context::getCurrent();
-        //                $span = $builder->startSpan();
-        //                Context::storage()->attach($span->storeInContext($parent));
-        //            },
-        //            /** @psalm-suppress UndefinedClass */
-        //            post: static function (FrontController $frontController, array $params, ResponseInterface|ResultInterface $response, ?Throwable $exception) {
-        //                $scope = Context::storage()->scope();
-        //                if (!$scope) {
-        //                    return;
-        //                }
-        //                $scope->detach();
-        //                $span = Span::fromContext($scope->context());
-        //                if ($exception) {
-        //                    $span->recordException($exception);
-        //                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
-        //                }
-        //                $span->end();
-        //            }
-        //        );
+        /** @psalm-suppress UndefinedClass */
+        hook(
+            FrontController::class,
+            'dispatch',
+            /** @psalm-suppress UndefinedClass */
+            pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+                $request = $params[0] instanceof RequestInterface ? $params[0] : null;
+                $builder = $instrumentation->tracer()
+                    ->spanBuilder('dispatch')
+                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
+                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
+                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
+                    ->setAttribute(Magento2Attributes::MAGENTO2_MODULE_NAME, $request?->getModuleName() ?? null)
+                    ->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request?->getActionName() ?? null);
+                $span = $builder->startSpan();
+                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
+            },
+            /** @psalm-suppress UndefinedClass */
+            post: static function (FrontController $frontController, array $params, ResponseInterface|ResultInterface $response, ?Throwable $exception) {
+                $scope = Context::storage()->scope();
+                if (!$scope) {
+                    return;
+                }
+                $scope->detach();
+                $span = Span::fromContext($scope->context());
+                if ($exception) {
+                    $span->recordException($exception);
+                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
+                }
+                $span->end();
+            }
+        );
         //
         //        hook(
         //            FrontController::class,
