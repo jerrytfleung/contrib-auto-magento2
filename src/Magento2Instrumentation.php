@@ -141,13 +141,15 @@ final class Magento2Instrumentation
             /** @psalm-suppress UndefinedClass */
             pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $request = $params[0] instanceof RequestInterface ? $params[0] : null;
+
                 $builder = $instrumentation->tracer()
                     ->spanBuilder('dispatch')
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
                     ->setAttribute(Magento2Attributes::MAGENTO2_MODULE_NAME, $request?->getModuleName() ?? null)
-                    ->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request?->getActionName() ?? null);
+                    ->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request?->getActionName() ?? null)
+                    ->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request?->getCookie('mage-cache-sessid') ?? null);
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },

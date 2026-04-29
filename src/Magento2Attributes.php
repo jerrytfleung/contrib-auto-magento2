@@ -10,4 +10,5 @@ final class Magento2Attributes
     const MAGENTO2_AREA_CODE = 'magento2.area.code';
     const MAGENTO2_MODULE_NAME = 'magento2.module.name';
     const MAGENTO2_ACTION_NAME = 'magento2.action.name';
+    const MAGENTO2_CACHE_SESSION_ID = 'magento2.cache.session.id';
 }
