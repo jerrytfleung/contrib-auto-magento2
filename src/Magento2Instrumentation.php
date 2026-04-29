@@ -110,7 +110,7 @@ final class Magento2Instrumentation
             AreaList::class,
             'getCodeByFrontName',
             pre: static function (AreaList $areaList, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $frontName = isset($params[0]) && is_string($params[0]) ? $params[0] : null;
+                $frontName = $params[0] ?? 'null';
                 $builder = $instrumentation->tracer()
                     ->spanBuilder('AreaList.getCodeByFrontName')
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
