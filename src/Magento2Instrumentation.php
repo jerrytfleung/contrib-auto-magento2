@@ -149,7 +149,7 @@ final class Magento2Instrumentation
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
                     ->setAttribute(Magento2Attributes::MAGENTO2_MODULE_NAME, $request?->getModuleName() ?? null)
                     ->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request?->getActionName() ?? null)
-                    ->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request?->getCookie('mage-cache-sessid') ?? null);
+                    ->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request?->getCookie('mage-cache-sessid', null) ?? null);
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
