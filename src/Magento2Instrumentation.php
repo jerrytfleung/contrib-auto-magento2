@@ -14,6 +14,8 @@ use Magento\Framework\App\FrontController;
 use Magento\Framework\App\Http;
 use Magento\Framework\App\Request\Http as HttpRequest;
 use Magento\Framework\App\RequestInterface;
+
+use Magento\Framework\App\Response\Http as HttpResponse;
 use Magento\Framework\App\ResponseInterface;
 use Magento\Framework\App\RouterInterface;
 use Magento\Framework\App\View;
@@ -98,7 +100,7 @@ final class Magento2Instrumentation
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
-            post: static function (Http $http, array $params, ResponseInterface $response, ?Throwable $exception) {
+            post: static function (Http $http, array $params, ResultInterface | HttpResponse $response, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
@@ -109,37 +111,44 @@ final class Magento2Instrumentation
                     $span->recordException($exception);
                     $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
                 }
+                if ($response instanceof HttpResponse) {
+                    $span->setAttribute(TraceAttributes::HTTP_RESPONSE_STATUS_CODE, $response->getStatusCode());
+                    $span->setAttribute(TraceAttributes::HTTP_RESPONSE_BODY_SIZE, strlen($response->getBody()));
+                    foreach ($response->getHeaders()->toArray() as $key => $value) {
+                        $span->setAttribute(TraceAttributes::HTTP_RESPONSE_HEADER . $key, $value);
+                    }
+                }
                 $span->end();
             }
         );
 
-        hook(
-            AreaList::class,
-            'getCodeByFrontName',
-            pre: static function (AreaList $areaList, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $frontName = $params[0] ?? 'null';
-                $builder = $instrumentation->tracer()
-                    ->spanBuilder('AreaList.getCodeByFrontName')
-                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
-                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
-                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
-                    ->setAttribute(Magento2Attributes::MAGENTO2_FRONT_NAME, $frontName);
-                $span = $builder->startSpan();
-                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
-            },
-            post: static function (AreaList $areaList, array $params, ?string $areaCode) {
-                $scope = Context::storage()->scope();
-                if (!$scope) {
-                    return;
-                }
-                $scope->detach();
-                $span = Span::fromContext($scope->context());
-                if ($areaCode) {
-                    $span->setAttribute(Magento2Attributes::MAGENTO2_AREA_CODE, $areaCode);
-                }
-                $span->end();
-            }
-        );
+        //        hook(
+        //            AreaList::class,
+        //            'getCodeByFrontName',
+        //            pre: static function (AreaList $areaList, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+        //                $frontName = $params[0] ?? 'null';
+        //                $builder = $instrumentation->tracer()
+        //                    ->spanBuilder('AreaList.getCodeByFrontName')
+        //                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
+        //                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
+        //                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
+        //                    ->setAttribute(Magento2Attributes::MAGENTO2_FRONT_NAME, $frontName);
+        //                $span = $builder->startSpan();
+        //                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
+        //            },
+        //            post: static function (AreaList $areaList, array $params, ?string $areaCode) {
+        //                $scope = Context::storage()->scope();
+        //                if (!$scope) {
+        //                    return;
+        //                }
+        //                $scope->detach();
+        //                $span = Span::fromContext($scope->context());
+        //                if ($areaCode) {
+        //                    $span->setAttribute(Magento2Attributes::MAGENTO2_AREA_CODE, $areaCode);
+        //                }
+        //                $span->end();
+        //            }
+        //        );
 
         /** @psalm-suppress UndefinedClass */
         hook(
@@ -155,13 +164,12 @@ final class Magento2Instrumentation
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
                     ->setAttribute(Magento2Attributes::MAGENTO2_MODULE_NAME, $request?->getModuleName() ?? null)
-                    ->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request?->getActionName() ?? null)
-                    ->setAttribute(Magento2Attributes::MAGENTO2_CACHE_SESSION_ID, $request?->getCookie('mage-cache-sessid', null) ?? null);
+                    ->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request?->getActionName() ?? null);
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
             /** @psalm-suppress UndefinedClass */
-            post: static function (FrontController $frontController, array $params, ResponseInterface|ResultInterface $response, ?Throwable $exception) {
+            post: static function (FrontController $frontController, array $params, ResponseInterface|ResultInterface|null $response, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
@@ -180,15 +188,11 @@ final class Magento2Instrumentation
             RouterInterface::class,
             'match',
             pre: static function (RouterInterface $routerInterface, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $request = $params[0] instanceof RequestInterface ? $params[0] : null;
-
                 $builder = $instrumentation->tracer()
                     ->spanBuilder('RouterInterface.match')
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
-                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
-                    ->setAttribute(Magento2Attributes::MAGENTO2_MODULE_NAME, $request?->getModuleName() ?? null)
-                    ->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request?->getActionName() ?? null);
+                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
@@ -248,7 +252,7 @@ final class Magento2Instrumentation
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
-            post: static function (Action $action, array $params, ?ResponseInterface $response, ?Throwable $exception) {
+            post: static function (Action $action, array $params, ResponseInterface|ResultInterface|null $response, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
@@ -268,7 +272,7 @@ final class Magento2Instrumentation
             'execute',
             pre: static function (ActionInterface $actionInterface, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $builder = $instrumentation->tracer()
-                    ->spanBuilder('execute')
+                    ->spanBuilder('ActionInterface.execute')
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
