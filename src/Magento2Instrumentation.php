@@ -260,6 +260,33 @@ final class Magento2Instrumentation
             }
         );
 
+        hook(
+            ActionInterface::class,
+            'execute',
+            pre: static function (ActionInterface $actionInterface, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+                $builder = $instrumentation->tracer()
+                    ->spanBuilder('action_body')
+                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
+                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
+                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
+                $span = $builder->startSpan();
+                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
+            },
+            post: static function (ActionInterface $action, array $params, ResponseInterface|ResultInterface|null $response, ?Throwable $exception) {
+                $scope = Context::storage()->scope();
+                if (!$scope) {
+                    return;
+                }
+                $scope->detach();
+                $span = Span::fromContext($scope->context());
+                if ($exception) {
+                    $span->recordException($exception);
+                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
+                }
+                $span->end();
+            }
+        );
+
         //        hook(
         //            FrontController::class,
         //            'getActionResponse',
