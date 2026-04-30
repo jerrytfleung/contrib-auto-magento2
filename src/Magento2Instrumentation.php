@@ -13,6 +13,7 @@ use Magento\Framework\App\Http;
 use Magento\Framework\App\RequestInterface;
 use Magento\Framework\App\ResponseInterface;
 use Magento\Framework\App\Router\Base;
+use Magento\Framework\App\RouterInterface;
 use Magento\Framework\Controller\ResultInterface;
 use Nyholm\Psr7Server\ServerRequestCreator;
 use OpenTelemetry\API\Behavior\LogsMessagesTrait;
@@ -173,23 +174,22 @@ final class Magento2Instrumentation
         );
 
         hook(
-            Base::class,
-            'matchAction',
-            pre: static function (Base $base, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+            RouterInterface::class,
+            'match',
+            pre: static function (RouterInterface $routerInterface, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $request = $params[0] instanceof RequestInterface ? $params[0] : null;
 
                 $builder = $instrumentation->tracer()
-                    ->spanBuilder('Base.matchAction')
+                    ->spanBuilder('RouterInterface.match')
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
                     ->setAttribute(Magento2Attributes::MAGENTO2_MODULE_NAME, $request?->getModuleName() ?? null)
-                    ->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request?->getActionName() ?? null)
-                    ->setAttribute(Magento2Attributes::MAGENTO2_CACHE_SESSION_ID, $request?->getCookie('mage-cache-sessid', null) ?? null);
+                    ->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request?->getActionName() ?? null);
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
-            post: static function (Base $base, array $params, ?ActionInterface $actionInterface, ?Throwable $exception) {
+            post: static function (RouterInterface $routerInterface, array $params, ActionInterface $actionInterface, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
@@ -199,12 +199,6 @@ final class Magento2Instrumentation
                 if ($exception) {
                     $span->recordException($exception);
                     $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
-                }
-                $request = $params[0] instanceof HttpRequest ? $params[0] : null;
-                if ($request) {
-                    $span->setAttribute(Magento2Attributes::MAGENTO2_MODULE_NAME, $request->getModuleName() ?? null);
-                    $span->setAttribute(Magento2Attributes::MAGENTO2_CONTROLLER_NAME, $request->getControllerName() ?? null);
-                    $span->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request->getActionName() ?? null);
                 }
                 $span->end();
             }
