@@ -236,8 +236,9 @@ final class Magento2Instrumentation
             'dispatch',
             pre: static function (Action $action, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $request = $params[0] instanceof HttpRequest ? $params[0] : null;
+                $spanName = $request?->getFullActionName() ?? 'unknown';
                 $builder = $instrumentation->tracer()
-                    ->spanBuilder($request?->getFullActionName() ?? 'unknown')
+                    ->spanBuilder($spanName)
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
