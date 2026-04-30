@@ -189,7 +189,7 @@ final class Magento2Instrumentation
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
-            post: static function (RouterInterface $routerInterface, array $params, ActionInterface $actionInterface, ?Throwable $exception) {
+            post: static function (RouterInterface $routerInterface, array $params, ?ActionInterface $actionInterface, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
