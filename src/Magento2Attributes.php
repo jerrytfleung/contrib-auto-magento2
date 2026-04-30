@@ -12,4 +12,5 @@ final class Magento2Attributes
     const MAGENTO2_CONTROLLER_NAME = 'magento2.controller.name';
     const MAGENTO2_ACTION_NAME = 'magento2.action.name';
     const MAGENTO2_CACHE_SESSION_ID = 'magento2.cache.session.id';
+    const MAGENTO2_VIEW_OUTPUT = 'magento2.view.output';
 }
