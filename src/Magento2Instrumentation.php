@@ -116,6 +116,8 @@ final class Magento2Instrumentation
                     foreach ($response->getHeaders()->toArray() as $key => $value) {
                         $span->setAttribute(TraceAttributes::HTTP_RESPONSE_HEADER . $key, $value);
                     }
+                    $prop = Globals::responsePropagator();
+                    $prop->inject($response, ResponsePropagationSetter::instance(), $scope->context());
                 }
                 $span->end();
             }
