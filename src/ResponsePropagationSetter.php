@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace OpenTelemetry\Contrib\Instrumentation\Magento2;
 
 use function assert;
-use OpenTelemetry\Context\Propagation\PropagationSetterInterface;
 use Magento\Framework\App\Response\Http as HttpResponse;
+use OpenTelemetry\Context\Propagation\PropagationSetterInterface;
 
 final class ResponsePropagationSetter implements PropagationSetterInterface
 {
@@ -17,14 +17,7 @@ final class ResponsePropagationSetter implements PropagationSetterInterface
         return $instance ??= new self();
     }
 
-    /** @psalm-suppress PossiblyUnusedMethod */
-    public function keys($carrier): array
-    {
-        assert($carrier instanceof HttpResponse);
-
-        return array_keys($carrier->getHeaders()->toArray());
-    }
-
+    #[\Override]
     public function set(&$carrier, string $key, string $value): void
     {
         assert($carrier instanceof HttpResponse);

@@ -199,13 +199,12 @@ class Magento2InstrumentationTest extends TestCase
         $this->requestMock->expects($this->once())
             ->method('isHead')
             ->willReturn(false);
-
         $this->responseMock->expects($this->once())
             ->method('getStatusCode')
             ->willReturn(200);
         $this->responseMock->expects($this->once())
             ->method('getBody')
-            ->willReturn('<html><head></head><body>Test</body></html>');
+            ->willReturn('Body');
         $headers = new Headers();
         $headers->addHeaders(['k1' => 'v1', 'k2' => 'v2', 'k3' => 'v3']);
         $this->responseMock->expects($this->once())
@@ -217,7 +216,6 @@ class Magento2InstrumentationTest extends TestCase
                 'controller_front_send_response_before',
                 ['request' => $this->requestMock, 'response' => $this->responseMock]
             );
-
         $this->eventManagerMock->expects($this->once())
             ->method('dispatch')
             ->with(
@@ -226,6 +224,12 @@ class Magento2InstrumentationTest extends TestCase
             );
         $response = $this->http->launch();
         $this->assertCount(1, $this->storage);
-        $this->assertArrayHasKey('X-Foo', $response->getHeaders());
+        $this->assertInstanceOf(\OpenTelemetry\SDK\Trace\ImmutableSpan::class, $this->storage[0]);
+        $span = $this->storage[0];
+        $this->assertEquals('Http.launch', $span->getName());
+        $attributes = $span->getAttributes()->toArray();
+        $this->assertArrayHasKey('http.response.header.k1', $attributes);
+        $this->assertArrayHasKey('http.response.header.k2', $attributes);
+        $this->assertArrayHasKey('http.response.header.k3', $attributes);
     }
 }

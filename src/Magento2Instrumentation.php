@@ -114,7 +114,7 @@ final class Magento2Instrumentation
                     $span->setAttribute(TraceAttributes::HTTP_RESPONSE_STATUS_CODE, $response->getStatusCode());
                     $span->setAttribute(TraceAttributes::HTTP_RESPONSE_BODY_SIZE, strlen($response->getBody()));
                     foreach ($response->getHeaders()->toArray() as $key => $value) {
-                        $span->setAttribute(TraceAttributes::HTTP_RESPONSE_HEADER . $key, $value);
+                        $span->setAttribute(TraceAttributes::HTTP_RESPONSE_HEADER . '.' . $key, $value);
                     }
                     $prop = Globals::responsePropagator();
                     $prop->inject($response, ResponsePropagationSetter::instance(), $scope->context());
