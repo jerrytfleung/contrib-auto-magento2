@@ -213,33 +213,6 @@ final class Magento2Instrumentation
                 $span->end();
             }
         );
-
-        hook(
-            View::class,
-            'renderLayout',
-            pre: static function (View $view, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $builder = $instrumentation->tracer()
-                    ->spanBuilder($view->getDefaultLayoutHandle())
-                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
-                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
-                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
-                $span = $builder->startSpan();
-                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
-            },
-            post: static function (View $view, array $params, ?View $returnView, ?Throwable $exception) {
-                $scope = Context::storage()->scope();
-                if (!$scope) {
-                    return;
-                }
-                $scope->detach();
-                $span = Span::fromContext($scope->context());
-                if ($exception) {
-                    $span->recordException($exception);
-                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
-                }
-                $span->end();
-            }
-        );
     }
 
     private static function getScriptNameFromRequest(ServerRequestInterface $request): string
