@@ -262,6 +262,10 @@ class BootstrapTest extends TestCase
         $this->bootstrapMock->expects($this->once())->method('terminate')->with($expectedException);
         $this->application->expects($this->once())->method('catchException')->willReturn(false);
         $this->runAndRestoreErrorHandler($this->bootstrapMock, $this->application);
+
+        $this->assertCount(1, $this->storage);
+        $this->assertInstanceOf(ImmutableSpan::class, $this->storage[0]);
+        $span = $this->storage[0];
     }
 
     public function testRunWithInstallErrors()
