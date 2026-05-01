@@ -7,18 +7,13 @@ namespace OpenTelemetry\Contrib\Instrumentation\Magento2;
 use Http\Discovery\Psr17Factory;
 use Magento\Framework\App\Action\Action;
 use Magento\Framework\App\ActionInterface;
-use Magento\Framework\App\Area;
-use Magento\Framework\App\AreaList;
 use Magento\Framework\App\Bootstrap;
 use Magento\Framework\App\FrontController;
 use Magento\Framework\App\Http;
 use Magento\Framework\App\Request\Http as HttpRequest;
-use Magento\Framework\App\RequestInterface;
 
 use Magento\Framework\App\Response\Http as HttpResponse;
 use Magento\Framework\App\ResponseInterface;
-use Magento\Framework\App\RouterInterface;
-use Magento\Framework\App\View;
 use Magento\Framework\Controller\ResultInterface;
 use Nyholm\Psr7Server\ServerRequestCreator;
 use OpenTelemetry\API\Behavior\LogsMessagesTrait;
