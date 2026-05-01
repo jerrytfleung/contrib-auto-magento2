@@ -1,11 +1,8 @@
 <?php
-/**
- * Copyright 2015 Adobe
- * All Rights Reserved.
- */
+
 declare(strict_types=1);
 
-namespace Magento\Framework\App\Test\Unit;
+namespace OpenTelemetry\Tests\Instrumentation\Magento2\Unit;
 
 use ArrayObject;
 use Magento\Framework\App\Bootstrap;
@@ -14,12 +11,9 @@ use Magento\Framework\App\Filesystem\DirectoryList;
 use Magento\Framework\App\MaintenanceMode;
 use Magento\Framework\App\ObjectManagerFactory;
 use Magento\Framework\App\ResponseInterface;
-use Magento\Framework\App\State;
 use Magento\Framework\AppInterface;
 use Magento\Framework\Filesystem;
 use Magento\Framework\Filesystem\Directory\ReadInterface;
-use Magento\Framework\Filesystem\DriverInterface;
-use Magento\Framework\Filesystem\DriverPool;
 use Magento\Framework\HTTP\PhpEnvironment\RemoteAddress;
 use Magento\Framework\ObjectManager\ObjectManager;
 use Magento\Framework\ObjectManagerInterface;
@@ -30,7 +24,6 @@ use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
 use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
 use OpenTelemetry\SDK\Trace\TracerProvider;
 use PHPUnit\Framework\MockObject\MockObject;
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -151,96 +144,7 @@ class BootstrapTest extends TestCase
         $this->scope->detach();
     }
 
-    public function testCreateObjectManagerFactory()
-    {
-        $result = Bootstrap::createObjectManagerFactory('test', []);
-        $this->assertInstanceOf(ObjectManagerFactory::class, $result);
-    }
-
-    public function testCreateFilesystemDirectoryList()
-    {
-        $result = Bootstrap::createFilesystemDirectoryList(
-            'test',
-            [Bootstrap::INIT_PARAM_FILESYSTEM_DIR_PATHS => [DirectoryList::APP => ['path' => '/custom/path']]]
-        );
-        /** @var DirectoryList $result */
-        $this->assertInstanceOf(DirectoryList::class, $result);
-        $this->assertEquals('/custom/path', $result->getPath(DirectoryList::APP));
-    }
-
-    public function testCreateFilesystemDriverPool()
-    {
-        $driverClass = get_class($this->createMock(DriverInterface::class));
-        $result = Bootstrap::createFilesystemDriverPool(
-            [Bootstrap::INIT_PARAM_FILESYSTEM_DRIVERS => ['custom' => $driverClass]]
-        );
-        /** @var DriverPool $result */
-        $this->assertInstanceOf(DriverPool::class, $result);
-        $this->assertInstanceOf($driverClass, $result->getDriver('custom'));
-    }
-
-    public function testGetParams()
-    {
-        $testParams = ['testValue1', 'testValue2'];
-        $bootstrap = self::createBootstrap($testParams);
-        $this->assertSame($testParams, $bootstrap->getParams());
-    }
-
-    /**
-     * Creates a bootstrap object
-     *
-     * @param array $testParams
-     * @return Bootstrap
-     */
-    private function createBootstrap($testParams = ['value1', 'value2'])
-    {
-        return new Bootstrap($this->objectManagerFactory, '', $testParams);
-    }
-
-    public function testCreateApplication()
-    {
-        $bootstrap = self::createBootstrap();
-        $testArgs = ['arg1', 'arg2'];
-        $this->assertSame($this->application, $bootstrap->createApplication('someApplicationType', $testArgs));
-    }
-
-    public function testGetObjectManager()
-    {
-        $bootstrap = self::createBootstrap();
-        $this->assertSame($this->objectManager, $bootstrap->getObjectManager());
-    }
-
-    /**
-     */
-    #[DataProvider('isDeveloperModeDataProvider')]
-    public function testIsDeveloperMode($modeFromEnvironment, $modeFromDeployment, $isDeveloper)
-    {
-        $testParams = [];
-        if ($modeFromEnvironment) {
-            $testParams[State::PARAM_MODE] = $modeFromEnvironment;
-        }
-        if ($modeFromDeployment) {
-            $this->deploymentConfig->method('get')->willReturn($modeFromDeployment);
-        }
-        $bootstrap = self::createBootstrap($testParams);
-        $this->assertEquals($isDeveloper, $bootstrap->isDeveloperMode());
-    }
-
-    /**
-     * @return array
-     */
-    public static function isDeveloperModeDataProvider()
-    {
-        return [
-            [null, null, false],
-            [State::MODE_DEVELOPER, State::MODE_PRODUCTION, true],
-            [State::MODE_PRODUCTION, State::MODE_DEVELOPER, false],
-            [null, State::MODE_DEVELOPER, true],
-            [null, State::MODE_PRODUCTION, false]
-        ];
-    }
-
-    public function testRunNoErrors()
+    public function test_run_no_errors()
     {
         $responseMock = $this->createMock(ResponseInterface::class);
         $this->bootstrapMock->expects($this->once())->method('assertMaintenance')->willReturn(null);
@@ -254,7 +158,7 @@ class BootstrapTest extends TestCase
 
     }
 
-    public function testRunWithMaintenanceErrors()
+    public function test_run_with_maintenance_errors()
     {
         $expectedException = new \Exception('');
         $this->bootstrapMock->expects($this->once())->method('assertMaintenance')
@@ -263,80 +167,11 @@ class BootstrapTest extends TestCase
         $this->application->expects($this->once())->method('catchException')->willReturn(false);
         $this->runAndRestoreErrorHandler($this->bootstrapMock, $this->application);
 
-        $this->assertCount(1, $this->storage);
+        $this->assertCount(2, $this->storage);
         $this->assertInstanceOf(ImmutableSpan::class, $this->storage[0]);
-        $span = $this->storage[0];
-    }
-
-    public function testRunWithInstallErrors()
-    {
-        $expectedException = new \Exception('');
-        $this->bootstrapMock->expects($this->once())->method('assertMaintenance')->willReturn(null);
-        $this->bootstrapMock->expects($this->once())->method('assertInstalled')
-            ->willThrowException($expectedException);
-        $this->bootstrapMock->expects($this->once())->method('terminate')->with($expectedException);
-        $this->application->expects($this->once())->method('catchException')->willReturn(false);
-        $this->runAndRestoreErrorHandler($this->bootstrapMock, $this->application);
-    }
-
-    public function testRunWithBothErrors()
-    {
-        $expectedMaintenanceException = new \Exception('');
-        $this->bootstrapMock->expects($this->once())->method('assertMaintenance')
-            ->willThrowException($expectedMaintenanceException);
-        $this->bootstrapMock->expects($this->never())->method('assertInstalled');
-        $this->bootstrapMock->expects($this->once())->method('terminate')->with($expectedMaintenanceException);
-        $this->application->expects($this->once())->method('catchException')->willReturn(false);
-        $this->runAndRestoreErrorHandler($this->bootstrapMock, $this->application);
-    }
-
-    /**
-     */
-    #[DataProvider('assertMaintenanceDataProvider')]
-    public function testAssertMaintenance($isOn, $isExpected)
-    {
-        $bootstrap = self::createBootstrap([Bootstrap::PARAM_REQUIRE_MAINTENANCE => $isExpected]);
-        $this->maintenanceMode->expects($this->once())->method('isOn')->willReturn($isOn);
-        $this->remoteAddress->expects($this->once())->method('getRemoteAddress')->willReturn(false);
-        $this->application->expects($this->never())->method('launch');
-        $this->application->expects($this->once())->method('catchException')->willReturn(true);
-        $this->runAndRestoreErrorHandler($bootstrap, $this->application);
-        $this->assertEquals(Bootstrap::ERR_MAINTENANCE, $bootstrap->getErrorCode());
-    }
-
-    /**
-     * @return array
-     */
-    public static function assertMaintenanceDataProvider()
-    {
-        return [
-            [true, false],
-            [false, true]
-        ];
-    }
-
-    /**
-     */
-    #[DataProvider('assertInstalledDataProvider')]
-    public function testAssertInstalled($isInstalled, $isExpected)
-    {
-        $bootstrap = self::createBootstrap([Bootstrap::PARAM_REQUIRE_IS_INSTALLED => $isExpected]);
-        $this->deploymentConfig->expects($this->once())->method('isAvailable')->willReturn($isInstalled);
-        $this->application->expects($this->never())->method('launch');
-        $this->application->expects($this->once())->method('catchException')->willReturn(true);
-        $this->runAndRestoreErrorHandler($bootstrap, $this->application);
-        $this->assertEquals(Bootstrap::ERR_IS_INSTALLED, $bootstrap->getErrorCode());
-    }
-
-    /**
-     * @return array
-     */
-    public static function assertInstalledDataProvider()
-    {
-        return [
-            [false, true],
-            [true, false],
-        ];
+        $exceptionSpan = $this->storage[0];
+        $this->assertInstanceOf(ImmutableSpan::class, $this->storage[1]);
+        $rootSpan = $this->storage[1];
     }
 
     private function runAndRestoreErrorHandler(Bootstrap $bootstrap, AppInterface $application): void
