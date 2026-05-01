@@ -210,6 +210,9 @@ class Magento2InstrumentationTest extends TestCase
         $this->responseMock->expects($this->once())
             ->method('getBody')
             ->willReturn('Body');
+        $this->responseMock->expects($this->once())
+            ->method('toString')
+            ->willReturn('String');
         $headers = new Headers();
         $headers->addHeaders(['k1' => 'v1', 'k2' => 'v2', 'k3' => 'v3']);
         $this->responseMock->expects($this->once())
@@ -243,6 +246,8 @@ class Magento2InstrumentationTest extends TestCase
         $this->assertEquals(200, $attributes[TraceAttributes::HTTP_RESPONSE_STATUS_CODE]);
         $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_BODY_SIZE, $attributes);
         $this->assertEquals(4, $attributes[TraceAttributes::HTTP_RESPONSE_BODY_SIZE]);
+        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_SIZE, $attributes);
+        $this->assertEquals(6, $attributes[TraceAttributes::HTTP_RESPONSE_SIZE]);
         $this->assertArrayHasKey(CodeAttributes::CODE_FUNCTION_NAME, $attributes);
         $this->assertNotEmpty($attributes[CodeAttributes::CODE_FUNCTION_NAME]);
         $this->assertArrayHasKey(CodeAttributes::CODE_FILE_PATH, $attributes);
