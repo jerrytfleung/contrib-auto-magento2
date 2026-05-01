@@ -15,6 +15,7 @@ install and configure the extension and SDK.
 ## Overview
 Auto-instrumentation hooks are registered via composer, and spans will automatically be created for:
 - `Bootstrap::run()` - root span
+- `Bootstrap::terminate()` - bootstrap terminate span
 - `Http::launch()` - http launch span
 - `FrontController::dispatch` - front controller dispatch span
 - `Action::dispatch` - action dispatch span
