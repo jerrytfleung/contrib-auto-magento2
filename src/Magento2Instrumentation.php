@@ -116,7 +116,7 @@ final class Magento2Instrumentation
                     $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
                 }
                 if ($response instanceof HttpResponse) {
-                    $span->setAttribute(TraceAttributes::HTTP_RESPONSE_BODY_SIZE, $response->getHeader('Content-Length'));
+                    $span->setAttribute(TraceAttributes::HTTP_RESPONSE_BODY_SIZE, strlen($response->getBody()));
                     foreach ($response->getHeaders()->toArray() as $key => $value) {
                         $span->setAttribute(TraceAttributes::HTTP_RESPONSE_HEADER . '.' . $key, $value);
                     }
