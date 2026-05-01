@@ -74,6 +74,11 @@ final class Magento2Instrumentation
                     ->setAttribute(TraceAttributes::CLIENT_ADDRESS, $request->getUri()->getHost())
                     ->setAttribute(TraceAttributes::CLIENT_PORT, $request->getUri()->getPort())
                     ->startSpan();
+
+                foreach ($request->getHeaders() as $key => $value) {
+                    $span->setAttribute(TraceAttributes::HTTP_REQUEST_HEADER . '.' . $key, $value);
+                }
+
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
             post: static function (Bootstrap $bootstrap, array $params) {
@@ -99,7 +104,7 @@ final class Magento2Instrumentation
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
-            post: static function (Http $http, array $params, ResultInterface | HttpResponse | null $response, ?Throwable $exception) {
+            post: static function (Http $http, array $params, ResultInterface|HttpResponse|null $response, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
@@ -111,11 +116,12 @@ final class Magento2Instrumentation
                     $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
                 }
                 if ($response instanceof HttpResponse) {
-                    $span->setAttribute(TraceAttributes::HTTP_RESPONSE_STATUS_CODE, $response->getStatusCode());
-                    $span->setAttribute(TraceAttributes::HTTP_RESPONSE_BODY_SIZE, strlen($response->getBody()));
+                    $span->setAttribute(TraceAttributes::HTTP_RESPONSE_BODY_SIZE, $response->getHeader('Content-Length'));
                     foreach ($response->getHeaders()->toArray() as $key => $value) {
                         $span->setAttribute(TraceAttributes::HTTP_RESPONSE_HEADER . '.' . $key, $value);
                     }
+                    $span->setAttribute(TraceAttributes::HTTP_RESPONSE_SIZE, strlen($response->toString()));
+                    $span->setAttribute(TraceAttributes::HTTP_RESPONSE_STATUS_CODE, $response->getStatusCode());
                     $prop = Globals::responsePropagator();
                     $prop->inject($response, ResponsePropagationSetter::instance(), $scope->context());
                 }
@@ -129,46 +135,15 @@ final class Magento2Instrumentation
             'dispatch',
             /** @psalm-suppress UndefinedClass */
             pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $request = $params[0] instanceof RequestInterface ? $params[0] : null;
-
                 $builder = $instrumentation->tracer()
                     ->spanBuilder('FrontController.dispatch')
-                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
-                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
-                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
-                    ->setAttribute(Magento2Attributes::MAGENTO2_MODULE_NAME, $request?->getModuleName() ?? null)
-                    ->setAttribute(Magento2Attributes::MAGENTO2_ACTION_NAME, $request?->getActionName() ?? null);
-                $span = $builder->startSpan();
-                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
-            },
-            /** @psalm-suppress UndefinedClass */
-            post: static function (FrontController $frontController, array $params, ResponseInterface|ResultInterface|null $response, ?Throwable $exception) {
-                $scope = Context::storage()->scope();
-                if (!$scope) {
-                    return;
-                }
-                $scope->detach();
-                $span = Span::fromContext($scope->context());
-                if ($exception) {
-                    $span->recordException($exception);
-                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
-                }
-                $span->end();
-            }
-        );
-
-        hook(
-            FrontController::class,
-            'processRequest',
-            pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $builder = $instrumentation->tracer()
-                    ->spanBuilder('FrontController.processRequest')
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
+            /** @psalm-suppress UndefinedClass */
             post: static function (FrontController $frontController, array $params, ResponseInterface|ResultInterface|null $response, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
@@ -240,48 +215,18 @@ final class Magento2Instrumentation
         );
 
         hook(
-            Area::class,
-            '_loadPart',
-            pre: static function (Area $area, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $part = $params[0] ?? 'unknown';
+            View::class,
+            'renderLayout',
+            pre: static function (View $view, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $builder = $instrumentation->tracer()
-                    ->spanBuilder('_loadPart:' . $part)
+                    ->spanBuilder($view->getDefaultLayoutHandle())
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno);
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
-            post: static function (Area $area, array $params, Area $returnArea, ?Throwable $exception) {
-                $scope = Context::storage()->scope();
-                if (!$scope) {
-                    return;
-                }
-                $scope->detach();
-                $span = Span::fromContext($scope->context());
-                if ($exception) {
-                    $span->recordException($exception);
-                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
-                }
-                $span->end();
-            }
-        );
-
-        hook(
-            View::class,
-            'renderLayout',
-            pre: static function (View $view, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $output = $params[0] ?? 'unknown';
-                $builder = $instrumentation->tracer()
-                    ->spanBuilder('renderLayout')
-                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
-                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
-                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
-                    ->setAttribute(Magento2Attributes::MAGENTO2_VIEW_OUTPUT, $output);
-                $span = $builder->startSpan();
-                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
-            },
-            post: static function (View $view, array $params, View $returnView, ?Throwable $exception) {
+            post: static function (View $view, array $params, ?View $returnView, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
