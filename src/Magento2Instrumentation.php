@@ -39,6 +39,9 @@ final class Magento2Instrumentation
 
     public static function register(): void
     {
+        /** @var \OpenTelemetry\API\Metrics\HistogramInterface|null */
+        static $histogram;
+
         $instrumentation = new CachedInstrumentation(
             'io.opentelemetry.contrib.php.magento2',
             null,
@@ -128,13 +131,27 @@ final class Magento2Instrumentation
 
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
-            post: static function (Http $http, array $params, ResultInterface|HttpResponse|null $response, ?Throwable $exception) {
+            post: static function (Http $http, array $params, ResultInterface|HttpResponse|null $response, ?Throwable $exception) use (&$histogram, $instrumentation) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
                 }
                 $scope->detach();
                 $span = Span::fromContext($scope->context());
+
+                //https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#http-server
+                $histogram ??= $instrumentation->meter()->createHistogram(
+                    'http.server.request.duration',
+                    's',
+                    'Duration of HTTP server requests.',
+                    ['ExplicitBucketBoundaries' => [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10]]
+                );
+//                //
+//                $histogram->record($span->getDuration() / 1_000_000_000, [);
+//                    TraceAttributes::HTTP_REQUEST_METHOD => $span->getAttribute(TraceAttributes::HTTP_REQUEST_METHOD),
+//                    TraceAttributes::HTTP_RESPONSE_STATUS_CODE => $response?->getStatusCode(),
+//                ]);
+
                 if ($exception) {
                     $span->recordException($exception);
                     $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
