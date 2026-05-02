@@ -17,6 +17,7 @@ use Magento\Framework\App\ResponseInterface;
 use Magento\Framework\Controller\ResultInterface;
 use Nyholm\Psr7Server\ServerRequestCreator;
 use OpenTelemetry\API\Behavior\LogsMessagesTrait;
+use OpenTelemetry\API\Common\Time\ClockInterface;
 use OpenTelemetry\API\Globals;
 use OpenTelemetry\API\Instrumentation\CachedInstrumentation;
 use OpenTelemetry\API\Trace\Span;
@@ -24,6 +25,7 @@ use OpenTelemetry\API\Trace\SpanKind;
 use OpenTelemetry\API\Trace\StatusCode;
 use OpenTelemetry\Context\Context;
 use function OpenTelemetry\Instrumentation\hook;
+use OpenTelemetry\SDK\Trace\ReadableSpanInterface;
 use OpenTelemetry\SemConv\Attributes\CodeAttributes;
 use OpenTelemetry\SemConv\TraceAttributes;
 use Psr\Http\Message\ServerRequestInterface;
@@ -139,19 +141,6 @@ final class Magento2Instrumentation
                 $scope->detach();
                 $span = Span::fromContext($scope->context());
 
-                //https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#http-server
-                $histogram ??= $instrumentation->meter()->createHistogram(
-                    'http.server.request.duration',
-                    's',
-                    'Duration of HTTP server requests.',
-                    ['ExplicitBucketBoundaries' => [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10]]
-                );
-//                //
-//                $histogram->record($span->getDuration() / 1_000_000_000, [);
-//                    TraceAttributes::HTTP_REQUEST_METHOD => $span->getAttribute(TraceAttributes::HTTP_REQUEST_METHOD),
-//                    TraceAttributes::HTTP_RESPONSE_STATUS_CODE => $response?->getStatusCode(),
-//                ]);
-
                 if ($exception) {
                     $span->recordException($exception);
                     $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
@@ -165,6 +154,21 @@ final class Magento2Instrumentation
                     $span->setAttribute(TraceAttributes::HTTP_RESPONSE_STATUS_CODE, $response->getStatusCode());
                     $prop = Globals::responsePropagator();
                     $prop->inject($response, ResponsePropagationSetter::instance(), $scope->context());
+                }
+                //https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#http-server
+                $histogram ??= $instrumentation->meter()->createHistogram(
+                    'http.server.request.duration',
+                    's',
+                    'Duration of HTTP server requests.',
+                    ['ExplicitBucketBoundaries' => [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10]]
+                );
+                if ($span instanceof ReadableSpanInterface) {
+                    $histogram->record($span->getDuration() / ClockInterface::NANOS_PER_SECOND, [
+                        TraceAttributes::HTTP_REQUEST_METHOD => $span->getAttribute(TraceAttributes::HTTP_REQUEST_METHOD),
+                        TraceAttributes::URL_SCHEME => $span->getAttribute(TraceAttributes::URL_SCHEME),
+                        TraceAttributes::NETWORK_PROTOCOL_VERSION => $span->getAttribute(TraceAttributes::NETWORK_PROTOCOL_VERSION),
+                    ]);
+                    // $exception::class
                 }
                 $span->end();
             }
