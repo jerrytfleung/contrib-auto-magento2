@@ -91,7 +91,7 @@ final class Magento2Instrumentation
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
-                    ->setAttribute(TraceAttributes::URL_FULL, (string) $request->getUri())
+                    ->setAttribute(TraceAttributes::URL_FULL, $request->getUri())
                     ->setAttribute(TraceAttributes::URL_SCHEME, $request->getUri()->getScheme())
                     ->setAttribute(TraceAttributes::URL_PATH, $request->getUri()->getPath())
                     ->setAttribute(TraceAttributes::HTTP_REQUEST_METHOD, $request->getMethod())
@@ -102,7 +102,7 @@ final class Magento2Instrumentation
                     ->setAttribute(TraceAttributes::SERVER_PORT, $request->getUri()->getPort() ?? ($request->getUri()->getScheme() === 'https' ? 443 : 80));
 
                 foreach ($request->getHeaders() as $key => $value) {
-                    $spanBuilder->setAttribute(TraceAttributes::HTTP_REQUEST_HEADER . '.' . $key, $value);
+                    $spanBuilder->setAttribute(TraceAttributes::HTTP_REQUEST_HEADER . '.' . $key, implode(',',$value));
                 }
 
                 $span = $spanBuilder->startSpan();
