@@ -102,7 +102,7 @@ final class Magento2Instrumentation
                     ->setAttribute(TraceAttributes::SERVER_PORT, $request->getUri()->getPort() ?? ($request->getUri()->getScheme() === 'https' ? 443 : 80));
 
                 foreach ($request->getHeaders() as $key => $value) {
-                    $spanBuilder->setAttribute(TraceAttributes::HTTP_REQUEST_HEADER . '.' . $key, implode(',',$value));
+                    $spanBuilder->setAttribute(TraceAttributes::HTTP_REQUEST_HEADER . '.' . $key, implode(',', $value));
                 }
 
                 $span = $spanBuilder->startSpan();
