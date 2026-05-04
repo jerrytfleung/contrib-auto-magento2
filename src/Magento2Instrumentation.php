@@ -52,34 +52,6 @@ final class Magento2Instrumentation
 
         hook(
             Bootstrap::class,
-            'run',
-            pre: static function (Bootstrap $bootstrap, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $factory = new Psr17Factory();
-                $request = (new ServerRequestCreator($factory, $factory, $factory, $factory))->fromGlobals();
-                $parent = Globals::propagator()->extract($request->getHeaders());
-                $span = $instrumentation->tracer()
-                    ->spanBuilder('Bootstrap.run')
-                    ->setParent($parent)
-                    ->setSpanKind(SpanKind::KIND_SERVER)
-                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
-                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
-                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
-                    ->startSpan();
-                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
-            },
-            post: static function (Bootstrap $bootstrap, array $params) {
-                $scope = Context::storage()->scope();
-                if (!$scope) {
-                    return;
-                }
-                $scope->detach();
-                $span = Span::fromContext($scope->context());
-                $span->end();
-            }
-        );
-
-        hook(
-            Bootstrap::class,
             'terminate',
             pre: static function (Bootstrap $bootstrap, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $exception = $params[0] instanceof Throwable ? $params[0] : null;
@@ -111,9 +83,11 @@ final class Magento2Instrumentation
             pre: static function (Http $http, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $factory = new Psr17Factory();
                 $request = (new ServerRequestCreator($factory, $factory, $factory, $factory))->fromGlobals();
-
+                $parent = Globals::propagator()->extract($request->getHeaders());
                 $spanBuilder = $instrumentation->tracer()
                     ->spanBuilder(sprintf('%s %s', $request->getMethod(), self::getScriptNameFromRequest($request)))
+                    ->setParent($parent)
+                    ->setSpanKind(SpanKind::KIND_SERVER)
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
