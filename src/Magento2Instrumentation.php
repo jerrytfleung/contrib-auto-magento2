@@ -111,7 +111,8 @@ final class Magento2Instrumentation
             pre: static function (Http $http, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $factory = new Psr17Factory();
                 $request = (new ServerRequestCreator($factory, $factory, $factory, $factory))->fromGlobals();
-                $span = $instrumentation->tracer()
+
+                $spanBuilder = $instrumentation->tracer()
                     ->spanBuilder(sprintf('%s %s', $request->getMethod(), self::getScriptNameFromRequest($request)))
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
@@ -123,13 +124,14 @@ final class Magento2Instrumentation
                     ->setAttribute(TraceAttributes::NETWORK_PROTOCOL_VERSION, $request->getProtocolVersion())
                     ->setAttribute(TraceAttributes::USER_AGENT_ORIGINAL, $request->getHeaderLine('User-Agent'))
                     ->setAttribute(TraceAttributes::HTTP_REQUEST_BODY_SIZE, $request->getHeaderLine('Content-Length'))
-                    ->setAttribute(TraceAttributes::CLIENT_ADDRESS, $request->getUri()->getHost())
-                    ->setAttribute(TraceAttributes::CLIENT_PORT, $request->getUri()->getPort())
-                    ->startSpan();
+                    ->setAttribute(TraceAttributes::SERVER_ADDRESS, $request->getUri()->getHost())
+                    ->setAttribute(TraceAttributes::SERVER_PORT, $request->getUri()->getPort() ?? ($request->getUri()->getScheme() === 'https' ? 443 : 80));
 
                 foreach ($request->getHeaders() as $key => $value) {
-                    $span->setAttribute(TraceAttributes::HTTP_REQUEST_HEADER . '.' . $key, $value);
+                    $spanBuilder->setAttribute(TraceAttributes::HTTP_REQUEST_HEADER . '.' . $key, $value);
                 }
+
+                $span = $spanBuilder->startSpan();
 
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
@@ -141,9 +143,12 @@ final class Magento2Instrumentation
                 $scope->detach();
                 $span = Span::fromContext($scope->context());
 
+                $responseMeta = [];
+
                 if ($exception) {
                     $span->recordException($exception);
                     $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
+                    $responseMeta[TraceAttributes::ERROR_TYPE] = (string) $exception->getCode();
                 }
                 if ($response instanceof HttpResponse) {
                     $span->setAttribute(TraceAttributes::HTTP_RESPONSE_BODY_SIZE, strlen($response->getBody()));
@@ -152,6 +157,7 @@ final class Magento2Instrumentation
                     }
                     $span->setAttribute(TraceAttributes::HTTP_RESPONSE_SIZE, strlen($response->toString()));
                     $span->setAttribute(TraceAttributes::HTTP_RESPONSE_STATUS_CODE, $response->getStatusCode());
+                    $responseMeta[TraceAttributes::HTTP_RESPONSE_STATUS_CODE] = (string) $response->getStatusCode();
                     $prop = Globals::responsePropagator();
                     $prop->inject($response, ResponsePropagationSetter::instance(), $scope->context());
                 }
@@ -163,12 +169,12 @@ final class Magento2Instrumentation
                     ['ExplicitBucketBoundaries' => [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10]]
                 );
                 if ($span instanceof ReadableSpanInterface) {
-                    $histogram->record($span->getDuration() / ClockInterface::NANOS_PER_SECOND, [
-                        TraceAttributes::HTTP_REQUEST_METHOD => $span->getAttribute(TraceAttributes::HTTP_REQUEST_METHOD),
-                        TraceAttributes::URL_SCHEME => $span->getAttribute(TraceAttributes::URL_SCHEME),
-                        TraceAttributes::NETWORK_PROTOCOL_VERSION => $span->getAttribute(TraceAttributes::NETWORK_PROTOCOL_VERSION),
-                    ]);
-                    // $exception::class
+                    $spanAttrs = [
+                        TraceAttributes::HTTP_REQUEST_METHOD => (string) $span->getAttribute(TraceAttributes::HTTP_REQUEST_METHOD),
+                        TraceAttributes::URL_SCHEME => (string) $span->getAttribute(TraceAttributes::URL_SCHEME),
+                        TraceAttributes::NETWORK_PROTOCOL_VERSION => (string) $span->getAttribute(TraceAttributes::NETWORK_PROTOCOL_VERSION),
+                    ];
+                    $histogram->record($span->getDuration() / ClockInterface::NANOS_PER_SECOND, array_merge($spanAttrs, $responseMeta));
                 }
                 $span->end();
             }
