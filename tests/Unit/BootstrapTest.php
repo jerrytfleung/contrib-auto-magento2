@@ -1,6 +1,5 @@
 <?php
 
-
 declare(strict_types=1);
 
 namespace OpenTelemetry\Tests\Instrumentation\Magento2\Unit;
@@ -11,7 +10,6 @@ use Magento\Framework\App\DeploymentConfig;
 use Magento\Framework\App\Filesystem\DirectoryList;
 use Magento\Framework\App\MaintenanceMode;
 use Magento\Framework\App\ObjectManagerFactory;
-use Magento\Framework\App\ResponseInterface;
 use Magento\Framework\AppInterface;
 use Magento\Framework\Filesystem;
 use Magento\Framework\Filesystem\Directory\ReadInterface;
@@ -20,10 +18,12 @@ use Magento\Framework\ObjectManager\ObjectManager;
 use Magento\Framework\ObjectManagerInterface;
 use OpenTelemetry\API\Instrumentation\Configurator;
 use OpenTelemetry\Context\ScopeInterface;
+use OpenTelemetry\SDK\Trace\Event;
 use OpenTelemetry\SDK\Trace\ImmutableSpan;
 use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
 use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
 use OpenTelemetry\SDK\Trace\TracerProvider;
+use OpenTelemetry\SemConv\Attributes\ExceptionAttributes;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -147,7 +147,7 @@ class BootstrapTest extends TestCase
 
     public function test_run_with_maintenance_errors()
     {
-        $expectedException = new \Exception('');
+        $expectedException = new \Exception('Message');
         $this->bootstrapMock->expects($this->once())->method('assertMaintenance')
             ->willThrowException($expectedException);
         $this->bootstrapMock->expects($this->once())->method('terminate')->with($expectedException);
@@ -156,8 +156,18 @@ class BootstrapTest extends TestCase
 
         $this->assertCount(1, $this->storage);
         $this->assertInstanceOf(ImmutableSpan::class, $this->storage[0]);
-        $exceptionSpan = $this->storage[0];
-
+        $span = $this->storage[0];
+        $this->assertCount(1, $span->getEvents());
+        $this->assertInstanceOf(Event::class, $span->getEvents()[0]);
+        $event = $span->getEvents()[0];
+        $this->assertEquals('exception', $event->getName());
+        $eventAttributes = $event->getAttributes()->toArray();
+        $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_TYPE, $eventAttributes);
+        $this->assertEquals('Exception', $eventAttributes[ExceptionAttributes::EXCEPTION_TYPE]);
+        $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_MESSAGE, $eventAttributes);
+        $this->assertEquals('Message', $eventAttributes[ExceptionAttributes::EXCEPTION_MESSAGE]);
+        $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_STACKTRACE, $eventAttributes);
+        $this->assertNotEmpty($eventAttributes[ExceptionAttributes::EXCEPTION_STACKTRACE]);
     }
 
     private function runAndRestoreErrorHandler(Bootstrap $bootstrap, AppInterface $application): void
