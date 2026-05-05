@@ -144,9 +144,9 @@ final class Magento2Instrumentation
                 );
                 if ($span instanceof ReadableSpanInterface) {
                     $spanAttrs = [
-                        TraceAttributes::HTTP_REQUEST_METHOD => (string) $span->getAttribute(TraceAttributes::HTTP_REQUEST_METHOD),
-                        TraceAttributes::URL_SCHEME => (string) $span->getAttribute(TraceAttributes::URL_SCHEME),
-                        TraceAttributes::NETWORK_PROTOCOL_VERSION => (string) $span->getAttribute(TraceAttributes::NETWORK_PROTOCOL_VERSION),
+                        TraceAttributes::HTTP_REQUEST_METHOD => $span->getAttribute(TraceAttributes::HTTP_REQUEST_METHOD)->toString(),
+                        TraceAttributes::URL_SCHEME => $span->getAttribute(TraceAttributes::URL_SCHEME)->toString(),
+                        TraceAttributes::NETWORK_PROTOCOL_VERSION => $span->getAttribute(TraceAttributes::NETWORK_PROTOCOL_VERSION)->toString(),
                     ];
                     $histogram->record($span->getDuration() / ClockInterface::NANOS_PER_SECOND, array_merge($spanAttrs, $responseMeta));
                 }
