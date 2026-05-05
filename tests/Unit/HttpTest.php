@@ -236,12 +236,12 @@ class HttpTest extends TestCase
         $span = $this->storage[0];
         $this->assertNotEmpty($span->getName());
         $attributes = $span->getAttributes()->toArray();
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.' .'k1', $attributes);
-        $this->assertEquals('v1', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.' .'k1']);
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.' .'k2', $attributes);
-        $this->assertEquals('v2', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.' .'k2']);
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.' .'k3', $attributes);
-        $this->assertEquals('v3', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.' .'k3']);
+        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.' . 'k1', $attributes);
+        $this->assertEquals('v1', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.' . 'k1']);
+        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.' . 'k2', $attributes);
+        $this->assertEquals('v2', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.' . 'k2']);
+        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.' . 'k3', $attributes);
+        $this->assertEquals('v3', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.' . 'k3']);
         $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_STATUS_CODE, $attributes);
         $this->assertEquals(200, $attributes[TraceAttributes::HTTP_RESPONSE_STATUS_CODE]);
         $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_BODY_SIZE, $attributes);
@@ -282,12 +282,12 @@ class HttpTest extends TestCase
         $this->assertCount(1, $span->getEvents());
         $this->assertInstanceOf(Event::class, $span->getEvents()[0]);
         $event = $span->getEvents()[0];
-        $this->assertEquals("exception", $event->getName());
+        $this->assertEquals('exception', $event->getName());
         $eventAttributes = $event->getAttributes()->toArray();
         $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_TYPE, $eventAttributes);
-        $this->assertEquals("Exception", $eventAttributes[ExceptionAttributes::EXCEPTION_TYPE]);
+        $this->assertEquals('Exception', $eventAttributes[ExceptionAttributes::EXCEPTION_TYPE]);
         $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_MESSAGE, $eventAttributes);
-        $this->assertEquals("Message", $eventAttributes[ExceptionAttributes::EXCEPTION_MESSAGE]);
+        $this->assertEquals('Message', $eventAttributes[ExceptionAttributes::EXCEPTION_MESSAGE]);
         $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_STACKTRACE, $eventAttributes);
         $this->assertNotEmpty($eventAttributes[ExceptionAttributes::EXCEPTION_STACKTRACE]);
     }
