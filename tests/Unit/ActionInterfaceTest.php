@@ -1,8 +1,5 @@
 <?php
-/**
- * Copyright 2015 Adobe
- * All Rights Reserved.
- */
+
 declare(strict_types=1);
 
 namespace OpenTelemetry\Tests\Instrumentation\Magento2\Unit;
@@ -28,7 +25,30 @@ use OpenTelemetry\SemConv\Attributes\ExceptionAttributes;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Tests for ActionInterface::execute instrumentation hook.
+ * Tests for the ActionInterface::execute instrumentation hook in Magento2Instrumentation.
+ *
+ * The hook registers against \Magento\Framework\App\ActionInterface::execute — an interface
+ * method — so it fires for ANY class implementing ActionInterface, regardless of inheritance.
+ *
+ * The hook's pre-closure:
+ *   - Creates a span named 'ActionInterface.execute'
+ *   - Attaches code attributes (function name, file path, line number)
+ *
+ * The hook's post-closure:
+ *   - Records any exception thrown during execute() and sets span status to ERROR
+ *   - Ends the span unconditionally
+ *
+ * Test doubles:
+ *   - Success path  – uses a real Forward instance (extends AbstractAction, implements
+ *     ActionInterface). Forward::execute() calls $request->setDispatched(false) and returns
+ *     the response; the OTel hook fires because execute() is the hooked interface method.
+ *   - Exception path – uses an anonymous class implementing ActionInterface directly,
+ *     so execute() throws without any Magento bootstrap overhead.
+ *
+ * Span ordering (SimpleSpanProcessor exports on end()):
+ *   - Both paths produce exactly 1 span (execute() does not recurse into other hooked methods).
+ *
+ * @see \OpenTelemetry\Contrib\Instrumentation\Magento2\Magento2Instrumentation
  */
 class ActionInterfaceTest extends TestCase
 {
@@ -84,6 +104,17 @@ class ActionInterfaceTest extends TestCase
         $this->scope->detach();
     }
 
+    /**
+     * @test Happy path: execute() completes without exception.
+     *
+     * Calls Forward::execute() directly (bypassing dispatch) so only the
+     * ActionInterface::execute hook fires.
+     *
+     * Asserts that:
+     *   - exactly one span is exported
+     *   - the span is named 'ActionInterface.execute'
+     *   - code attributes (function name, file path, line number) are present and non-empty
+     */
     public function test_execute_records_span_and_code_attributes(): void
     {
         $this->forward->execute();
@@ -104,6 +135,24 @@ class ActionInterfaceTest extends TestCase
         $this->assertNotEmpty($attributes[CodeAttributes::CODE_LINE_NUMBER]);
     }
 
+    /**
+     * @test Exception path: execute() throws; the post-hook records the exception on the span.
+     *
+     * An anonymous ActionInterface implementation is used so execute() throws a
+     * RuntimeException without any framework side-effects.
+     *
+     * Asserts that:
+     *   - the exception is rethrown (verified via expectException)
+     *   - exactly one span is exported
+     *   - the span is named 'ActionInterface.execute'
+     *   - the span carries exactly one exception event with:
+     *       exception.type    containing 'RuntimeException'
+     *       exception.message = 'boom'
+     *       exception.stacktrace (non-empty)
+     *
+     * The try/finally pattern ensures span assertions run even though the exception
+     * propagates out of execute().
+     */
     public function test_execute_records_exception_event(): void
     {
         $this->expectException(\RuntimeException::class);

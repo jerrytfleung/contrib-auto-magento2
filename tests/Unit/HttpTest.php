@@ -35,6 +35,30 @@ use OpenTelemetry\SemConv\TraceAttributes;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
+/**
+ * Tests for the Http::launch instrumentation hook registered in Magento2Instrumentation.
+ *
+ * The hook's pre-closure:
+ *   - Builds a PSR-7 server request from globals via Nyholm\Psr7Server\ServerRequestCreator
+ *   - Extracts W3C trace-context from incoming request headers for distributed tracing
+ *   - Creates a SERVER-kind span named "{METHOD} {SCRIPT_NAME}" with request attributes
+ *
+ * The hook's post-closure:
+ *   - Records response attributes (status code, body/total size, headers)
+ *   - Records exceptions and sets span status to ERROR when dispatch throws
+ *   - Injects response-propagation headers via the global ResponsePropagator
+ *   - Records an http.server.request.duration histogram metric
+ *
+ * Span ordering (SimpleSpanProcessor exports on end()):
+ *   - Happy path:    one span  – storage[0] = Http::launch span
+ *   - Exception path: one span – storage[0] = Http::launch span (exception recorded)
+ *
+ * Setup helpers:
+ *   - setUpLaunchDependencies() wires every collaborator except the FrontController dispatch result
+ *   - setUpLaunch() adds a successful dispatch expectation on top of that
+ *
+ * @see \OpenTelemetry\Contrib\Instrumentation\Magento2\Magento2Instrumentation
+ */
 class HttpTest extends TestCase
 {
     private ScopeInterface $scope;
@@ -176,6 +200,13 @@ class HttpTest extends TestCase
     /**
      * Sets up all launch dependencies except the FrontController dispatch result, allowing
      * individual tests to define whether dispatch succeeds or throws.
+     *
+     * Wires:
+     *   - requestMock::getFrontName()      → 'frontName'
+     *   - areaListMock::getCodeByFrontName → 'areaCode'
+     *   - configLoaderMock::load           → []
+     *   - objectManagerMock::configure     → (void)
+     *   - objectManagerMock::get           → frontControllerMock
      */
     private function setUpLaunchDependencies(): void
     {
@@ -211,6 +242,20 @@ class HttpTest extends TestCase
             ->willReturn($this->responseMock);
     }
 
+    /**
+     * @test Happy path: Http::launch completes without exception.
+     *
+     * Asserts that the exported span:
+     *   - has a non-empty name (format: "{METHOD} {SCRIPT_NAME}")
+     *   - carries no exception events
+     *   - contains all expected code attributes (function name, file path, line number)
+     *   - contains all request attributes set by the pre-hook
+     *     (url.full as string, url.scheme, url.path, http.request.method,
+     *      network.protocol.version, server.address, server.port)
+     *   - contains response attributes controlled by the mock
+     *     (http.response.status_code=200, body_size=4, response_size=6)
+     *   - contains the three response headers k1/k2/k3 with their values
+     */
     public function test_launch()
     {
         $this->setUpLaunch();
@@ -289,6 +334,22 @@ class HttpTest extends TestCase
         $this->assertSame('v3', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.k3']);
     }
 
+    /**
+     * @test Exception path: Http::launch propagates exceptions thrown by FrontController::dispatch.
+     *
+     * Asserts that:
+     *   - the exception is rethrown to the caller (verified via expectException)
+     *   - exactly one span is exported even when an exception propagates
+     *   - the span has a non-empty name
+     *   - code attributes are present and non-empty
+     *   - the span carries exactly one exception event whose attributes contain:
+     *       exception.type    containing 'Exception'
+     *       exception.message = 'Message'
+     *       exception.stacktrace (non-empty)
+     *
+     * The try/finally pattern ensures span assertions run even though the
+     * exception propagates before the method returns normally.
+     */
     public function test_launch_exception(): void
     {
         $this->expectException(\Exception::class);
@@ -331,6 +392,5 @@ class HttpTest extends TestCase
             $this->assertNotEmpty($eventAttributes[ExceptionAttributes::EXCEPTION_STACKTRACE]);
         }
     }
-
 
 }

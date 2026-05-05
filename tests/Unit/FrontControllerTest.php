@@ -38,7 +38,24 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 /**
+ * Tests for the FrontController::dispatch instrumentation hook in Magento2Instrumentation.
+ *
+ * The hook's pre-closure:
+ *   - Creates a CLIENT-kind span named 'FrontController.dispatch'
+ *   - Attaches code attributes (function name, file path, line number)
+ *
+ * The hook's post-closure:
+ *   - Records any exception thrown during dispatch and sets span status to ERROR
+ *   - Ends the span unconditionally
+ *
+ * Span ordering (SimpleSpanProcessor exports on end()):
+ *   - Exception path (+router loop limit): 1 span – storage[0] = FrontController.dispatch span
+ *   - Success path (Forward controller):   2 spans – ActionInterface.execute ends first,
+ *     FrontController.dispatch ends second; findSpanByName() is used to locate the outer span
+ *   - NotFoundException path (noroute):    1+ spans; FrontController.dispatch span present
+ *
  * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
+ * @see \OpenTelemetry\Contrib\Instrumentation\Magento2\Magento2Instrumentation
  */
 class FrontControllerTest extends TestCase
 {
@@ -154,7 +171,21 @@ class FrontControllerTest extends TestCase
     }
 
     /**
-     * @return void
+     * @test Exception path: FrontController::dispatch throws LogicException when the router
+     * exhausts 100 match iterations without finding a controller.
+     *
+     * Asserts that:
+     *   - the LogicException is rethrown (verified via expectException)
+     *   - exactly one span is exported: the FrontController.dispatch span
+     *   - the span name is 'FrontController.dispatch'
+     *   - code attributes (function name, file path, line number) are present and non-empty
+     *   - the span carries exactly one exception event with:
+     *       exception.type    containing 'LogicException'
+     *       exception.message = 'Front controller reached 100 router match iterations'
+     *       exception.stacktrace (non-empty)
+     *
+     * The try/finally pattern ensures span assertions execute even though the
+     * exception propagates before the method returns normally.
      */
     public function testDispatchThrowException(): void
     {
@@ -284,7 +315,19 @@ class FrontControllerTest extends TestCase
 //    }
 
     /**
-     * @return void
+     * @test Happy path: FrontController::dispatch successfully routes to a Forward controller.
+     *
+     * The router returns false on the first iteration (simulating no match), then returns
+     * a real Forward instance on the second. Forward::dispatch() calls execute(), which
+     * triggers the ActionInterface::execute hook in addition to FrontController::dispatch.
+     *
+     * Asserts that:
+     *   - exactly two spans are exported:
+     *       1. ActionInterface.execute (inner span, ends first)
+     *       2. FrontController.dispatch (outer span, ends second)
+     *   - the FrontController.dispatch span is located by name
+     *   - code attributes (function name, file path, line number) are present and non-empty
+     *   - the FrontController.dispatch span carries no exception events
      */
     public function testDispatched(): void
     {
@@ -366,7 +409,16 @@ class FrontControllerTest extends TestCase
     }
 
     /**
-     * @return void
+     * @test NotFoundException path: FrontController::dispatch recovers from a router
+     * NotFoundException by forwarding to the 'noroute' action and dispatching again.
+     *
+     * On the first match attempt the router throws NotFoundException; FrontController
+     * catches it, resets the request to the noroute action, and iterates. On the second
+     * match attempt the mock Action controller is returned and dispatch succeeds.
+     *
+     * This test verifies the noroute recovery flow returns the correct response; span
+     * assertions are intentionally minimal here since the recovery path is covered by
+     * FrontController's own unit tests.
      */
     public function testDispatchedNotFoundException(): void
     {
@@ -435,6 +487,12 @@ class FrontControllerTest extends TestCase
         $this->assertEquals($response, $this->model->dispatch($this->request));
     }
 
+    /**
+     * Searches the exported span storage for the first span with the given name.
+     *
+     * Used in success-path tests where multiple spans are emitted and the outer
+     * FrontController.dispatch span is not at a predictable index.
+     */
     private function findSpanByName(string $name): ?ImmutableSpan
     {
         foreach ($this->storage as $span) {

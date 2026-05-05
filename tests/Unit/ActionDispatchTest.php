@@ -29,9 +29,30 @@ use PHPUnit\Framework\TestCase;
  * which auto-stubs the only abstract method (execute()) while leaving the concrete
  * dispatch() body intact so the OTel hook fires normally.
  *
- * Span ordering with SimpleSpanProcessor (spans exported on end()):
- *   - When execute() is NOT called (isDispatched=false): 1 span, storage[0] = Action::dispatch span
- *   - When execute() IS called: 2 spans, storage[0] = ActionInterface::execute, storage[1] = Action::dispatch
+ * The hook's pre-closure:
+ *   - Creates a span named after getFullActionName() ?? 'unknown'
+ *   - Attaches code attributes (function name, file path, line number)
+ *
+ * The hook's post-closure:
+ *   - Records any exception thrown during dispatch and sets span status to ERROR
+ *   - Ends the span unconditionally
+ *
+ * Why NOT Forward/AbstractAction:
+ *   Forward extends AbstractAction, NOT Action. The OTel hook fires for the class
+ *   where the method is defined; using Forward would never trigger Action::dispatch.
+ *
+ * Property injection via reflection:
+ *   Action::dispatch accesses $this->_response and $this->_actionFlag. Because the
+ *   constructor is disabled to skip complex dependency setup, injectProperty() walks
+ *   the class hierarchy and sets these fields directly.
+ *
+ * Span ordering (SimpleSpanProcessor exports on end()):
+ *   - isDispatched()=false: 1 span – storage[0] = Action::dispatch span
+ *   - isDispatched()=true + execute() throws: 2 spans –
+ *       storage[0] = ActionInterface.execute (inner, ends first)
+ *       storage[last] = Action::dispatch (outer, ends second)
+ *
+ * @see \OpenTelemetry\Contrib\Instrumentation\Magento2\Magento2Instrumentation
  */
 class ActionDispatchTest extends TestCase
 {
@@ -94,7 +115,10 @@ class ActionDispatchTest extends TestCase
     // -----------------------------------------------------------------------
 
     /**
-     * Walk up the class hierarchy until we find the property, then set it.
+     * Walk up the class hierarchy until the named property is found, then set it.
+     *
+     * Required because Action::dispatch reads _response and _actionFlag, which are
+     * declared in parent classes and cannot be set via the disabled constructor.
      */
     private static function injectProperty(object $object, string $name, mixed $value): void
     {
@@ -119,13 +143,12 @@ class ActionDispatchTest extends TestCase
         return $span;
     }
 
-    // -----------------------------------------------------------------------
-    // Tests – span naming
-    // -----------------------------------------------------------------------
-
     /**
-     * When the first parameter of dispatch() is an HttpRequest the span name
-     * must equal the value returned by getFullActionName().
+     * @test Span name is set to the value returned by getFullActionName().
+     *
+     * When the first argument to dispatch() is an HttpRequest the pre-hook captures
+     * $params[0]->getFullActionName() as the span name.
+     * isDispatched()=false prevents execute() from being called, so only one span is emitted.
      */
     public function test_dispatch_span_name_uses_full_action_name(): void
     {
@@ -138,8 +161,10 @@ class ActionDispatchTest extends TestCase
     }
 
     /**
-     * When getFullActionName() returns null the span name falls back to 'unknown'
-     * via the null-coalescing operator in the hook's pre-closure.
+     * @test Span name falls back to 'unknown' when getFullActionName() returns null.
+     *
+     * The pre-hook uses the null-coalescing operator: $request?->getFullActionName() ?? 'unknown'.
+     * A null return therefore produces 'unknown' as the span name.
      */
     public function test_dispatch_span_name_falls_back_to_unknown_when_null(): void
     {
@@ -151,13 +176,11 @@ class ActionDispatchTest extends TestCase
         $this->assertSame('unknown', $this->getSingleSpan()->getName());
     }
 
-    // -----------------------------------------------------------------------
-    // Tests – code attributes
-    // -----------------------------------------------------------------------
-
     /**
-     * Code attributes (function name, file path, line number) must always be
-     * present and non-empty on the dispatched span.
+     * @test Code attributes (function name, file path, line number) are always present.
+     *
+     * The pre-hook sets CodeAttributes::CODE_FUNCTION_NAME, CODE_FILE_PATH, and
+     * CODE_LINE_NUMBER unconditionally on every dispatch span.
      */
     public function test_dispatch_records_code_attributes(): void
     {
@@ -178,17 +201,24 @@ class ActionDispatchTest extends TestCase
         $this->assertNotEmpty($attrs[CodeAttributes::CODE_LINE_NUMBER]);
     }
 
-    // -----------------------------------------------------------------------
-    // Tests – exception recording
-    // -----------------------------------------------------------------------
-
     /**
-     * When execute() throws, the Action::dispatch post-hook must record the
-     * exception and mark the span as ERROR.
+     * @test When execute() throws, the post-hook records the exception on the dispatch span.
      *
-     * Span ordering (SimpleSpanProcessor exports on end):
-     *   storage[0] = ActionInterface::execute span  (inner, ends first)
-     *   storage[1] = Action::dispatch span           (outer, ends second)
+     * Setup:
+     *   - isDispatched()=true and actionFlag::get()=false so execute() is called
+     *   - execute() is stubbed to throw RuntimeException
+     *
+     * Span ordering after the throw:
+     *   storage[0]    = ActionInterface.execute span (inner, exception recorded)
+     *   storage[last] = Action::dispatch span  (outer, exception also recorded here)
+     *
+     * The test asserts the outer Action::dispatch span (storage[last]) carries:
+     *   - exception.type    containing 'RuntimeException'
+     *   - exception.message = 'Something went wrong'
+     *   - exception.stacktrace (non-empty)
+     *
+     * The try/finally pattern is used so assertions run even though the exception
+     * propagates out of dispatch().
      */
     public function test_dispatch_records_exception_on_span(): void
     {
