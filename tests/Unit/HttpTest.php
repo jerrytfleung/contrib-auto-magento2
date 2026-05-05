@@ -174,9 +174,10 @@ class HttpTest extends TestCase
     }
 
     /**
-     * Asserts mock objects with methods that are expected to be called when http->launch() is invoked.
+     * Sets up all launch dependencies except the FrontController dispatch result, allowing
+     * individual tests to define whether dispatch succeeds or throws.
      */
-    private function setUpLaunch()
+    private function setUpLaunchDependencies(): void
     {
         $frontName = 'frontName';
         $areaCode = 'areaCode';
@@ -196,6 +197,14 @@ class HttpTest extends TestCase
             ->method('get')
             ->with(FrontControllerInterface::class)
             ->willReturn($this->frontControllerMock);
+    }
+
+    /**
+     * Full happy-path launch setup: dispatch returns the response mock.
+     */
+    private function setUpLaunch(): void
+    {
+        $this->setUpLaunchDependencies();
         $this->frontControllerMock->expects($this->once())
             ->method('dispatch')
             ->with($this->requestMock)
@@ -235,65 +244,92 @@ class HttpTest extends TestCase
                 ['request' => $this->requestMock, 'response' => $this->responseMock]
             );
         $this->http->launch();
+
         $this->assertCount(1, $this->storage);
         $this->assertInstanceOf(ImmutableSpan::class, $this->storage[0]);
+        /** @var ImmutableSpan $span */
         $span = $this->storage[0];
         $this->assertNotEmpty($span->getName());
+        $this->assertCount(0, $span->getEvents());
+
         $attributes = $span->getAttributes()->toArray();
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.' . 'k1', $attributes);
-        $this->assertEquals('v1', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.' . 'k1']);
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.' . 'k2', $attributes);
-        $this->assertEquals('v2', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.' . 'k2']);
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.' . 'k3', $attributes);
-        $this->assertEquals('v3', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.' . 'k3']);
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_STATUS_CODE, $attributes);
-        $this->assertEquals(200, $attributes[TraceAttributes::HTTP_RESPONSE_STATUS_CODE]);
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_BODY_SIZE, $attributes);
-        $this->assertEquals(4, $attributes[TraceAttributes::HTTP_RESPONSE_BODY_SIZE]);
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_SIZE, $attributes);
-        $this->assertEquals(6, $attributes[TraceAttributes::HTTP_RESPONSE_SIZE]);
+
+        // --- code attributes ---
         $this->assertArrayHasKey(CodeAttributes::CODE_FUNCTION_NAME, $attributes);
         $this->assertNotEmpty($attributes[CodeAttributes::CODE_FUNCTION_NAME]);
         $this->assertArrayHasKey(CodeAttributes::CODE_FILE_PATH, $attributes);
         $this->assertNotEmpty($attributes[CodeAttributes::CODE_FILE_PATH]);
         $this->assertArrayHasKey(CodeAttributes::CODE_LINE_NUMBER, $attributes);
         $this->assertNotEmpty($attributes[CodeAttributes::CODE_LINE_NUMBER]);
+
+        // --- request attributes (values are environment-derived; assert presence and type) ---
+        $this->assertArrayHasKey(TraceAttributes::URL_FULL, $attributes);
+        $this->assertIsString($attributes[TraceAttributes::URL_FULL]);
+        $this->assertArrayHasKey(TraceAttributes::URL_SCHEME, $attributes);
+        $this->assertArrayHasKey(TraceAttributes::URL_PATH, $attributes);
+        $this->assertArrayHasKey(TraceAttributes::HTTP_REQUEST_METHOD, $attributes);
+        $this->assertArrayHasKey(TraceAttributes::NETWORK_PROTOCOL_VERSION, $attributes);
+        $this->assertArrayHasKey(TraceAttributes::SERVER_ADDRESS, $attributes);
+        $this->assertArrayHasKey(TraceAttributes::SERVER_PORT, $attributes);
+
+        // --- response attributes (values are controlled by the mock) ---
+        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_STATUS_CODE, $attributes);
+        $this->assertSame(200, $attributes[TraceAttributes::HTTP_RESPONSE_STATUS_CODE]);
+        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_BODY_SIZE, $attributes);
+        $this->assertSame(4, $attributes[TraceAttributes::HTTP_RESPONSE_BODY_SIZE]);
+        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_SIZE, $attributes);
+        $this->assertSame(6, $attributes[TraceAttributes::HTTP_RESPONSE_SIZE]);
+
+        // --- response headers ---
+        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.k1', $attributes);
+        $this->assertSame('v1', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.k1']);
+        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.k2', $attributes);
+        $this->assertSame('v2', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.k2']);
+        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.k3', $attributes);
+        $this->assertSame('v3', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.k3']);
     }
 
-    public function test_launch_exception()
+    public function test_launch_exception(): void
     {
-        $this->expectException('Exception');
+        $this->expectException(\Exception::class);
         $this->expectExceptionMessage('Message');
-        $this->setUpLaunch();
+
+        $this->setUpLaunchDependencies();
         $this->frontControllerMock->expects($this->once())
             ->method('dispatch')
             ->with($this->requestMock)
-            ->willThrowException(
-                new \Exception('Message')
-            );
-        $this->http->launch();
-        $this->assertCount(1, $this->storage);
-        $this->assertInstanceOf(ImmutableSpan::class, $this->storage[0]);
-        $span = $this->storage[0];
-        $this->assertEquals('Http.launch', $span->getName());
-        $attributes = $span->getAttributes()->toArray();
-        $this->assertArrayHasKey(CodeAttributes::CODE_FUNCTION_NAME, $attributes);
-        $this->assertNotEmpty($attributes[CodeAttributes::CODE_FUNCTION_NAME]);
-        $this->assertArrayHasKey(CodeAttributes::CODE_FILE_PATH, $attributes);
-        $this->assertNotEmpty($attributes[CodeAttributes::CODE_FILE_PATH]);
-        $this->assertArrayHasKey(CodeAttributes::CODE_LINE_NUMBER, $attributes);
-        $this->assertNotEmpty($attributes[CodeAttributes::CODE_LINE_NUMBER]);
-        $this->assertCount(1, $span->getEvents());
-        $this->assertInstanceOf(Event::class, $span->getEvents()[0]);
-        $event = $span->getEvents()[0];
-        $this->assertEquals('exception', $event->getName());
-        $eventAttributes = $event->getAttributes()->toArray();
-        $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_TYPE, $eventAttributes);
-        $this->assertEquals('Exception', $eventAttributes[ExceptionAttributes::EXCEPTION_TYPE]);
-        $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_MESSAGE, $eventAttributes);
-        $this->assertEquals('Message', $eventAttributes[ExceptionAttributes::EXCEPTION_MESSAGE]);
-        $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_STACKTRACE, $eventAttributes);
-        $this->assertNotEmpty($eventAttributes[ExceptionAttributes::EXCEPTION_STACKTRACE]);
+            ->willThrowException(new \Exception('Message'));
+
+        try {
+            $this->http->launch();
+        } finally {
+            $this->assertCount(1, $this->storage);
+            $this->assertInstanceOf(ImmutableSpan::class, $this->storage[0]);
+            /** @var ImmutableSpan $span */
+            $span = $this->storage[0];
+            $this->assertNotEmpty($span->getName());
+
+            $attributes = $span->getAttributes()->toArray();
+            $this->assertArrayHasKey(CodeAttributes::CODE_FUNCTION_NAME, $attributes);
+            $this->assertNotEmpty($attributes[CodeAttributes::CODE_FUNCTION_NAME]);
+            $this->assertArrayHasKey(CodeAttributes::CODE_FILE_PATH, $attributes);
+            $this->assertNotEmpty($attributes[CodeAttributes::CODE_FILE_PATH]);
+            $this->assertArrayHasKey(CodeAttributes::CODE_LINE_NUMBER, $attributes);
+            $this->assertNotEmpty($attributes[CodeAttributes::CODE_LINE_NUMBER]);
+
+            $this->assertCount(1, $span->getEvents());
+            $this->assertInstanceOf(Event::class, $span->getEvents()[0]);
+            $event = $span->getEvents()[0];
+            $this->assertSame('exception', $event->getName());
+
+            $eventAttributes = $event->getAttributes()->toArray();
+            $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_TYPE, $eventAttributes);
+            $this->assertStringContainsString('Exception', (string) $eventAttributes[ExceptionAttributes::EXCEPTION_TYPE]);
+            $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_MESSAGE, $eventAttributes);
+            $this->assertSame('Message', $eventAttributes[ExceptionAttributes::EXCEPTION_MESSAGE]);
+            $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_STACKTRACE, $eventAttributes);
+            $this->assertNotEmpty($eventAttributes[ExceptionAttributes::EXCEPTION_STACKTRACE]);
+        }
     }
 
 

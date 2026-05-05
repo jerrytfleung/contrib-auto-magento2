@@ -26,10 +26,13 @@ use Magento\Framework\Phrase;
 use Magento\Framework\TestFramework\Unit\Helper\ObjectManager;
 use OpenTelemetry\API\Instrumentation\Configurator;
 use OpenTelemetry\Context\ScopeInterface;
+use OpenTelemetry\SDK\Trace\Event;
 use OpenTelemetry\SDK\Trace\ImmutableSpan;
 use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
 use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
 use OpenTelemetry\SDK\Trace\TracerProvider;
+use OpenTelemetry\SemConv\Attributes\CodeAttributes;
+use OpenTelemetry\SemConv\Attributes\ExceptionAttributes;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -175,7 +178,35 @@ class FrontControllerTest extends TestCase
 
         $this->request->expects($this->any())->method('isDispatched')->willReturn(false);
 
-        $this->model->dispatch($this->request);
+        try {
+            $this->model->dispatch($this->request);
+        } finally {
+            $this->assertCount(1, $this->storage);
+            $this->assertInstanceOf(ImmutableSpan::class, $this->storage[0]);
+            /** @var ImmutableSpan $span */
+            $span = $this->storage[0];
+            $this->assertSame('FrontController.dispatch', $span->getName());
+
+            $attributes = $span->getAttributes()->toArray();
+            $this->assertArrayHasKey(CodeAttributes::CODE_FUNCTION_NAME, $attributes);
+            $this->assertNotEmpty($attributes[CodeAttributes::CODE_FUNCTION_NAME]);
+            $this->assertArrayHasKey(CodeAttributes::CODE_FILE_PATH, $attributes);
+            $this->assertNotEmpty($attributes[CodeAttributes::CODE_FILE_PATH]);
+            $this->assertArrayHasKey(CodeAttributes::CODE_LINE_NUMBER, $attributes);
+            $this->assertNotEmpty($attributes[CodeAttributes::CODE_LINE_NUMBER]);
+
+            $this->assertCount(1, $span->getEvents());
+            $this->assertInstanceOf(Event::class, $span->getEvents()[0]);
+            $event = $span->getEvents()[0];
+            $this->assertSame('exception', $event->getName());
+            $eventAttributes = $event->getAttributes()->toArray();
+            $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_TYPE, $eventAttributes);
+            $this->assertStringContainsString('LogicException', (string) $eventAttributes[ExceptionAttributes::EXCEPTION_TYPE]);
+            $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_MESSAGE, $eventAttributes);
+            $this->assertSame('Front controller reached 100 router match iterations', $eventAttributes[ExceptionAttributes::EXCEPTION_MESSAGE]);
+            $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_STACKTRACE, $eventAttributes);
+            $this->assertNotEmpty($eventAttributes[ExceptionAttributes::EXCEPTION_STACKTRACE]);
+        }
     }
 
 //    /**
@@ -319,10 +350,19 @@ class FrontControllerTest extends TestCase
 
         $this->assertEquals($response, $this->model->dispatch($this->request));
 
-        $this->assertCount(1, $this->storage);
-        $this->assertInstanceOf(ImmutableSpan::class, $this->storage[0]);
-        $span = $this->storage[0];
-        $this->assertNotEmpty($span->getName());
+        // FrontController.dispatch + ActionInterface.execute
+        $this->assertCount(2, $this->storage);
+        $frontControllerSpan = $this->findSpanByName('FrontController.dispatch');
+        $this->assertNotNull($frontControllerSpan);
+
+        $attributes = $frontControllerSpan->getAttributes()->toArray();
+        $this->assertArrayHasKey(CodeAttributes::CODE_FUNCTION_NAME, $attributes);
+        $this->assertNotEmpty($attributes[CodeAttributes::CODE_FUNCTION_NAME]);
+        $this->assertArrayHasKey(CodeAttributes::CODE_FILE_PATH, $attributes);
+        $this->assertNotEmpty($attributes[CodeAttributes::CODE_FILE_PATH]);
+        $this->assertArrayHasKey(CodeAttributes::CODE_LINE_NUMBER, $attributes);
+        $this->assertNotEmpty($attributes[CodeAttributes::CODE_LINE_NUMBER]);
+        $this->assertCount(0, $frontControllerSpan->getEvents());
     }
 
     /**
@@ -394,4 +434,16 @@ class FrontControllerTest extends TestCase
 
         $this->assertEquals($response, $this->model->dispatch($this->request));
     }
+
+    private function findSpanByName(string $name): ?ImmutableSpan
+    {
+        foreach ($this->storage as $span) {
+            if ($span instanceof ImmutableSpan && $span->getName() === $name) {
+                return $span;
+            }
+        }
+
+        return null;
+    }
 }
+

@@ -9,45 +9,34 @@ namespace OpenTelemetry\Tests\Instrumentation\Magento2\Unit;
 
 use ArrayObject;
 use Magento\Framework\App\Action\Forward;
+use Magento\Framework\App\ActionInterface;
 use Magento\Framework\App\Http\Context;
-use Magento\Framework\App\RequestInterface;
 use Magento\Framework\App\Response\Http;
-use Magento\Framework\App\ResponseInterface;
+use Magento\Framework\Controller\ResultInterface;
 use Magento\Framework\Stdlib\Cookie\CookieMetadataFactory;
 use Magento\Framework\Stdlib\CookieManagerInterface;
 use Magento\Framework\TestFramework\Unit\Helper\ObjectManager;
 use OpenTelemetry\API\Instrumentation\Configurator;
 use OpenTelemetry\Context\ScopeInterface;
+use OpenTelemetry\SDK\Trace\Event;
 use OpenTelemetry\SDK\Trace\ImmutableSpan;
 use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
 use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
 use OpenTelemetry\SDK\Trace\TracerProvider;
-use PHPUnit\Framework\MockObject\MockObject;
+use OpenTelemetry\SemConv\Attributes\CodeAttributes;
+use OpenTelemetry\SemConv\Attributes\ExceptionAttributes;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Test Forward
- *
- * getRequest,getResponse of AbstractAction class is also tested
+ * Tests for ActionInterface::execute instrumentation hook.
  */
-class ForwardTest extends TestCase
+class ActionInterfaceTest extends TestCase
 {
     private ScopeInterface $scope;
     private ArrayObject $storage;
-    /**
-     * @var Forward
-     */
-    protected $actionAbstract;
 
-    /**
-     * @var MockObject|RequestInterface
-     */
-    protected $request;
-
-    /**
-     * @var ResponseInterface
-     */
-    protected $response;
+    /** @var Forward */
+    private Forward $forward;
 
     protected function setUp(): void
     {
@@ -63,47 +52,96 @@ class ForwardTest extends TestCase
             ->activate();
 
         $objectManager = new ObjectManager($this);
-        $cookieMetadataFactoryMock = $this->getMockBuilder(
-            CookieMetadataFactory::class
-        )->disableOriginalConstructor()
-            ->getMock();
-        $cookieManagerMock = $this->createMock(CookieManagerInterface::class);
-        $contextMock = $this->getMockBuilder(Context::class)
+
+        $request = $this->getMockBuilder(\Magento\Framework\App\Request\Http::class)
             ->disableOriginalConstructor()
             ->getMock();
-        $this->response = $objectManager->getObject(
+
+        $response = $objectManager->getObject(
             Http::class,
             [
-                'cookieManager' => $cookieManagerMock,
-                'cookieMetadataFactory' => $cookieMetadataFactoryMock,
-                'context' => $contextMock
+                'cookieManager' => $this->createMock(CookieManagerInterface::class),
+                'cookieMetadataFactory' => $this->getMockBuilder(CookieMetadataFactory::class)
+                    ->disableOriginalConstructor()
+                    ->getMock(),
+                'context' => $this->getMockBuilder(Context::class)
+                    ->disableOriginalConstructor()
+                    ->getMock(),
             ]
         );
 
-        $this->request = $this->getMockBuilder(\Magento\Framework\App\Request\Http::class)
-            ->disableOriginalConstructor()
-            ->getMock();
-
-        $this->actionAbstract = $objectManager->getObject(
+        $this->forward = $objectManager->getObject(
             Forward::class,
             [
-                'request' => $this->request,
-                'response' => $this->response
+                'request' => $request,
+                'response' => $response,
             ]
         );
     }
 
-    public function tearDown(): void
+    protected function tearDown(): void
     {
         $this->scope->detach();
     }
 
-    public function testDispatch()
+    public function test_execute_records_span_and_code_attributes(): void
     {
-        $this->request->expects($this->once())->method('setDispatched')->with(false);
-        $this->actionAbstract->dispatch($this->request);
+        $this->forward->execute();
+
         $this->assertCount(1, $this->storage);
         $this->assertInstanceOf(ImmutableSpan::class, $this->storage[0]);
+
+        /** @var ImmutableSpan $span */
         $span = $this->storage[0];
+        $this->assertSame('ActionInterface.execute', $span->getName());
+
+        $attributes = $span->getAttributes()->toArray();
+        $this->assertArrayHasKey(CodeAttributes::CODE_FUNCTION_NAME, $attributes);
+        $this->assertNotEmpty($attributes[CodeAttributes::CODE_FUNCTION_NAME]);
+        $this->assertArrayHasKey(CodeAttributes::CODE_FILE_PATH, $attributes);
+        $this->assertNotEmpty($attributes[CodeAttributes::CODE_FILE_PATH]);
+        $this->assertArrayHasKey(CodeAttributes::CODE_LINE_NUMBER, $attributes);
+        $this->assertNotEmpty($attributes[CodeAttributes::CODE_LINE_NUMBER]);
+    }
+
+    public function test_execute_records_exception_event(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('boom');
+
+        $action = new class implements ActionInterface {
+            public function execute(): ResultInterface|\Magento\Framework\App\ResponseInterface
+            {
+                throw new \RuntimeException('boom');
+            }
+        };
+
+        try {
+            $action->execute();
+        } finally {
+            $this->assertCount(1, $this->storage);
+            $this->assertInstanceOf(ImmutableSpan::class, $this->storage[0]);
+
+            /** @var ImmutableSpan $span */
+            $span = $this->storage[0];
+            $this->assertSame('ActionInterface.execute', $span->getName());
+
+            $events = $span->getEvents();
+            $this->assertCount(1, $events);
+            $this->assertInstanceOf(Event::class, $events[0]);
+
+            /** @var Event $event */
+            $event = $events[0];
+            $this->assertSame('exception', $event->getName());
+
+            $eventAttributes = $event->getAttributes()->toArray();
+            $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_TYPE, $eventAttributes);
+            $this->assertStringContainsString('RuntimeException', (string) $eventAttributes[ExceptionAttributes::EXCEPTION_TYPE]);
+            $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_MESSAGE, $eventAttributes);
+            $this->assertSame('boom', $eventAttributes[ExceptionAttributes::EXCEPTION_MESSAGE]);
+            $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_STACKTRACE, $eventAttributes);
+            $this->assertNotEmpty($eventAttributes[ExceptionAttributes::EXCEPTION_STACKTRACE]);
+        }
     }
 }
+

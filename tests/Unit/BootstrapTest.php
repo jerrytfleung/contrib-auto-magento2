@@ -23,6 +23,7 @@ use OpenTelemetry\SDK\Trace\ImmutableSpan;
 use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
 use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
 use OpenTelemetry\SDK\Trace\TracerProvider;
+use OpenTelemetry\SemConv\Attributes\CodeAttributes;
 use OpenTelemetry\SemConv\Attributes\ExceptionAttributes;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -168,6 +169,45 @@ class BootstrapTest extends TestCase
         $this->assertEquals('Message', $eventAttributes[ExceptionAttributes::EXCEPTION_MESSAGE]);
         $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_STACKTRACE, $eventAttributes);
         $this->assertNotEmpty($eventAttributes[ExceptionAttributes::EXCEPTION_STACKTRACE]);
+    }
+
+    public function test_terminate_records_span_and_exception_attributes(): void
+    {
+        $throwable = new \RuntimeException('Terminate failed');
+
+        $this->invokeProtectedTerminate($this->bootstrapMock, $throwable);
+
+        $this->assertCount(1, $this->storage);
+        $this->assertInstanceOf(ImmutableSpan::class, $this->storage[0]);
+        /** @var ImmutableSpan $span */
+        $span = $this->storage[0];
+        $this->assertSame('Bootstrap::terminate', $span->getName());
+
+        $attributes = $span->getAttributes()->toArray();
+        $this->assertArrayHasKey(CodeAttributes::CODE_FUNCTION_NAME, $attributes);
+        $this->assertNotEmpty($attributes[CodeAttributes::CODE_FUNCTION_NAME]);
+        $this->assertArrayHasKey(CodeAttributes::CODE_FILE_PATH, $attributes);
+        $this->assertNotEmpty($attributes[CodeAttributes::CODE_FILE_PATH]);
+        $this->assertArrayHasKey(CodeAttributes::CODE_LINE_NUMBER, $attributes);
+        $this->assertNotEmpty($attributes[CodeAttributes::CODE_LINE_NUMBER]);
+
+        $this->assertCount(1, $span->getEvents());
+        $this->assertInstanceOf(Event::class, $span->getEvents()[0]);
+        $event = $span->getEvents()[0];
+        $this->assertSame('exception', $event->getName());
+        $eventAttributes = $event->getAttributes()->toArray();
+        $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_TYPE, $eventAttributes);
+        $this->assertStringContainsString('RuntimeException', (string) $eventAttributes[ExceptionAttributes::EXCEPTION_TYPE]);
+        $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_MESSAGE, $eventAttributes);
+        $this->assertSame('Terminate failed', $eventAttributes[ExceptionAttributes::EXCEPTION_MESSAGE]);
+        $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_STACKTRACE, $eventAttributes);
+        $this->assertNotEmpty($eventAttributes[ExceptionAttributes::EXCEPTION_STACKTRACE]);
+    }
+
+    private function invokeProtectedTerminate(Bootstrap $bootstrap, \Throwable $throwable): void
+    {
+        $method = new \ReflectionMethod($bootstrap, 'terminate');
+        $method->invoke($bootstrap, $throwable);
     }
 
     private function runAndRestoreErrorHandler(Bootstrap $bootstrap, AppInterface $application): void
