@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace OpenTelemetry\Tests\Instrumentation\Magento2\Integration;
+namespace OpenTelemetry\Tests\Instrumentation\Magento2\Unit;
 
 use ArrayObject;
 use Laminas\Http\Headers;
@@ -34,7 +34,7 @@ use OpenTelemetry\SemConv\TraceAttributes;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
-class Magento2InstrumentationTest extends TestCase
+class HttpTest extends TestCase
 {
     private ScopeInterface $scope;
     private ArrayObject $storage;

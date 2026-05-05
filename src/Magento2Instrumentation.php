@@ -131,7 +131,7 @@ final class Magento2Instrumentation
                     }
                     $span->setAttribute(TraceAttributes::HTTP_RESPONSE_SIZE, strlen($response->toString()));
                     $span->setAttribute(TraceAttributes::HTTP_RESPONSE_STATUS_CODE, $response->getStatusCode());
-                    $responseMeta[TraceAttributes::HTTP_RESPONSE_STATUS_CODE] = (string) $response->getStatusCode();
+                    $responseMeta[TraceAttributes::HTTP_RESPONSE_STATUS_CODE] = $span->getAttribute(TraceAttributes::HTTP_RESPONSE_STATUS_CODE);
                     $prop = Globals::responsePropagator();
                     $prop->inject($response, ResponsePropagationSetter::instance(), $scope->context());
                 }
