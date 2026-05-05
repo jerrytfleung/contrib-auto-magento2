@@ -8,6 +8,7 @@ use ArrayObject;
 use Laminas\Http\Headers;
 use Magento\Framework\App\AreaList;
 use Magento\Framework\App\ExceptionHandlerInterface;
+use Magento\Framework\App\FrontController;
 use Magento\Framework\App\FrontControllerInterface;
 use Magento\Framework\App\Http as AppHttp;
 use Magento\Framework\App\ObjectManager\ConfigLoader;
@@ -143,6 +144,9 @@ class HttpTest extends TestCase
             ->getMock();
         $this->objectManagerMock = $this->createMock(ObjectManagerInterface::class);
         $this->responseMock = $this->createMock(ResponseHttp::class);
+
+        // $this->frontController = new FrontController();
+
         $this->frontControllerMock = $this->createMock(FrontControllerInterface::class);
         $this->eventManagerMock = $this->getMockBuilder(Manager::class)
             ->disableOriginalConstructor()
@@ -291,4 +295,6 @@ class HttpTest extends TestCase
         $this->assertArrayHasKey(ExceptionAttributes::EXCEPTION_STACKTRACE, $eventAttributes);
         $this->assertNotEmpty($eventAttributes[ExceptionAttributes::EXCEPTION_STACKTRACE]);
     }
+
+
 }
