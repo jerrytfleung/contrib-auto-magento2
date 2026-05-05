@@ -54,7 +54,7 @@ use PHPUnit\Framework\TestCase;
  *
  * @see \OpenTelemetry\Contrib\Instrumentation\Magento2\Magento2Instrumentation
  */
-class ActionDispatchTest extends TestCase
+class ActionTest extends TestCase
 {
     private ScopeInterface $scope;
     private ArrayObject $storage;
