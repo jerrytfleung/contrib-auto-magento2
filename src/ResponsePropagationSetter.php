@@ -7,18 +7,24 @@ namespace OpenTelemetry\Contrib\Instrumentation\Magento2;
 use function assert;
 use Magento\Framework\App\Response\Http as HttpResponse;
 use OpenTelemetry\Context\Propagation\PropagationSetterInterface;
+use Override;
 
 final class ResponsePropagationSetter implements PropagationSetterInterface
 {
-    public static function instance(): self
-    {
-        static $instance;
+    private static ?self $instance = null;
 
-        return $instance ??= new self();
+    /** @psalm-external-mutation-free */
+    public static function getInstance(): self
+    {
+        if (null === self::$instance) {
+            self::$instance = new self();
+        }
+
+        return self::$instance;
     }
 
-    #[\Override]
-    public function set(&$carrier, string $key, string $value): void
+    #[Override]
+    public function set(mixed &$carrier, string $key, string $value): void
     {
         assert($carrier instanceof HttpResponse);
 

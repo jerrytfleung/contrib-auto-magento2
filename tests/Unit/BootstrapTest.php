@@ -14,7 +14,6 @@ use Magento\Framework\AppInterface;
 use Magento\Framework\Filesystem;
 use Magento\Framework\Filesystem\Directory\ReadInterface;
 use Magento\Framework\HTTP\PhpEnvironment\RemoteAddress;
-use Magento\Framework\ObjectManager\ObjectManager;
 use Magento\Framework\ObjectManagerInterface;
 use OpenTelemetry\API\Instrumentation\Configurator;
 use OpenTelemetry\Context\ScopeInterface;
@@ -25,12 +24,13 @@ use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
 use OpenTelemetry\SDK\Trace\TracerProvider;
 use OpenTelemetry\SemConv\Attributes\CodeAttributes;
 use OpenTelemetry\SemConv\Attributes\ExceptionAttributes;
+use Override;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 /**
- * Tests for the Bootstrap::terminate and Bootstrap::run instrumentation hooks
+ * Tests for the Bootstrap::terminate instrumentation hooks
  * in Magento2Instrumentation.
  *
  * Bootstrap::terminate hook (pre-only):
@@ -41,77 +41,47 @@ use Psr\Log\LoggerInterface;
  *   - Ends the span immediately inside the pre-closure (terminate is fire-and-forget,
  *     and exits the process, so there is no post-closure)
  *
- * Bootstrap::run hook (covered indirectly via test_run_with_maintenance_errors):
- *   - Creates a SERVER-kind span 'Bootstrap.run'
- *   - Ends in the post-closure; exceptions from the application are propagated via
- *     the terminate() call which is separately instrumented
- *
- * Accessing protected Bootstrap::terminate():
- *   ReflectionMethod::invoke() is used to call the protected method directly without
- *   triggering the real terminate() body (which calls exit(1)). The bootstrapMock
- *   already stubs terminate() via onlyMethods, so the real body never executes.
- *
  * Span ordering (SimpleSpanProcessor exports on end()):
  *   - terminate test: 1 span – storage[0] = Bootstrap::terminate span
- *   - run/maintenance test: 1 span – storage[0] = Bootstrap.run span
  *
- * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
  * @see \OpenTelemetry\Contrib\Instrumentation\Magento2\Magento2Instrumentation
  */
-class BootstrapTest extends TestCase
+final class BootstrapTest extends TestCase
 {
     private ScopeInterface $scope;
+    /** @var ArrayObject<array-key, mixed> */
     private ArrayObject $storage;
-    /**
-     * @var AppInterface|MockObject
-     */
-    protected $application;
+    /** @var AppInterface&MockObject */
+    protected AppInterface $application;
 
-    /**
-     * @var ObjectManagerFactory|MockObject
-     */
-    protected $objectManagerFactory;
+    /** @var ObjectManagerFactory&MockObject */
+    protected ObjectManagerFactory $objectManagerFactory;
 
-    /**
-     * @var ObjectManager|MockObject
-     */
-    protected $objectManager;
+    /** @var ObjectManagerInterface&MockObject */
+    protected ObjectManagerInterface $objectManager;
 
-    /**
-     * @var LoggerInterface|MockObject
-     */
-    protected $logger;
+    /** @var LoggerInterface&MockObject */
+    protected LoggerInterface $logger;
 
-    /**
-     * @var DirectoryList|MockObject
-     */
-    protected $dirs;
+    /** @var DirectoryList&MockObject */
+    protected DirectoryList $dirs;
 
-    /**
-     * @var ReadInterface|MockObject
-     */
-    protected $configDir;
+    /** @var ReadInterface&MockObject */
+    protected ReadInterface $configDir;
 
-    /**
-     * @var MaintenanceMode|MockObject
-     */
-    protected $maintenanceMode;
+    /** @var MaintenanceMode&MockObject */
+    protected MaintenanceMode $maintenanceMode;
 
-    /**
-     * @var MockObject
-     */
-    protected $deploymentConfig;
+    /** @var DeploymentConfig&MockObject */
+    protected DeploymentConfig $deploymentConfig;
 
-    /**
-     * @var \Magento\Framework\App\Bootstrap|MockObject
-     */
-    protected $bootstrapMock;
+    /** @var Bootstrap&MockObject */
+    protected Bootstrap $bootstrapMock;
 
-    /**
-     * @var RemoteAddress|MockObject
-     */
-    protected $remoteAddress;
+    /** @var RemoteAddress&MockObject */
+    protected RemoteAddress $remoteAddress;
 
+    #[Override]
     protected function setUp(): void
     {
         $this->storage = new ArrayObject();
@@ -167,7 +137,8 @@ class BootstrapTest extends TestCase
             ->getMock();
     }
 
-    public function tearDown(): void
+    #[Override]
+    protected function tearDown(): void
     {
         $this->scope->detach();
     }
@@ -186,7 +157,7 @@ class BootstrapTest extends TestCase
      *       exception.message = 'Message'
      *       exception.stacktrace (non-empty)
      */
-    public function test_run_with_maintenance_errors()
+    public function test_run_with_maintenance_errors(): void
     {
         $expectedException = new \Exception('Message');
         $this->bootstrapMock->expects($this->once())->method('assertMaintenance')

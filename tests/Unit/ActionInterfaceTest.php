@@ -9,7 +9,6 @@ use Magento\Framework\App\Action\Forward;
 use Magento\Framework\App\ActionInterface;
 use Magento\Framework\App\Http\Context;
 use Magento\Framework\App\Response\Http;
-use Magento\Framework\Controller\ResultInterface;
 use Magento\Framework\Stdlib\Cookie\CookieMetadataFactory;
 use Magento\Framework\Stdlib\CookieManagerInterface;
 use Magento\Framework\TestFramework\Unit\Helper\ObjectManager;
@@ -22,6 +21,7 @@ use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
 use OpenTelemetry\SDK\Trace\TracerProvider;
 use OpenTelemetry\SemConv\Attributes\CodeAttributes;
 use OpenTelemetry\SemConv\Attributes\ExceptionAttributes;
+use Override;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -50,14 +50,16 @@ use PHPUnit\Framework\TestCase;
  *
  * @see \OpenTelemetry\Contrib\Instrumentation\Magento2\Magento2Instrumentation
  */
-class ActionInterfaceTest extends TestCase
+final class ActionInterfaceTest extends TestCase
 {
     private ScopeInterface $scope;
+    /** @var ArrayObject<array-key, mixed> */
     private ArrayObject $storage;
 
     /** @var Forward */
     private Forward $forward;
 
+    #[Override]
     protected function setUp(): void
     {
         $this->storage = new ArrayObject();
@@ -71,12 +73,14 @@ class ActionInterfaceTest extends TestCase
             ->withTracerProvider($tracerProvider)
             ->activate();
 
+        /** @psalm-suppress DeprecatedClass */
         $objectManager = new ObjectManager($this);
 
         $request = $this->getMockBuilder(\Magento\Framework\App\Request\Http::class)
             ->disableOriginalConstructor()
             ->getMock();
 
+        /** @var Http $response */
         $response = $objectManager->getObject(
             Http::class,
             [
@@ -90,15 +94,18 @@ class ActionInterfaceTest extends TestCase
             ]
         );
 
-        $this->forward = $objectManager->getObject(
+        /** @var Forward $forward */
+        $forward = $objectManager->getObject(
             Forward::class,
             [
                 'request' => $request,
                 'response' => $response,
             ]
         );
+        $this->forward = $forward;
     }
 
+    #[Override]
     protected function tearDown(): void
     {
         $this->scope->detach();
@@ -158,12 +165,10 @@ class ActionInterfaceTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('boom');
 
-        $action = new class implements ActionInterface {
-            public function execute(): ResultInterface|\Magento\Framework\App\ResponseInterface
-            {
-                throw new \RuntimeException('boom');
-            }
-        };
+        $action = $this->createMock(ActionInterface::class);
+        $action->expects($this->once())
+            ->method('execute')
+            ->willThrowException(new \RuntimeException('boom'));
 
         try {
             $action->execute();
@@ -193,4 +198,3 @@ class ActionInterfaceTest extends TestCase
         }
     }
 }
-

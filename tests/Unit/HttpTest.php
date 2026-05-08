@@ -8,7 +8,6 @@ use ArrayObject;
 use Laminas\Http\Headers;
 use Magento\Framework\App\AreaList;
 use Magento\Framework\App\ExceptionHandlerInterface;
-use Magento\Framework\App\FrontController;
 use Magento\Framework\App\FrontControllerInterface;
 use Magento\Framework\App\Http as AppHttp;
 use Magento\Framework\App\ObjectManager\ConfigLoader;
@@ -31,7 +30,12 @@ use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
 use OpenTelemetry\SDK\Trace\TracerProvider;
 use OpenTelemetry\SemConv\Attributes\CodeAttributes;
 use OpenTelemetry\SemConv\Attributes\ExceptionAttributes;
-use OpenTelemetry\SemConv\TraceAttributes;
+use OpenTelemetry\SemConv\Attributes\HttpAttributes;
+use OpenTelemetry\SemConv\Attributes\NetworkAttributes;
+use OpenTelemetry\SemConv\Attributes\ServerAttributes;
+use OpenTelemetry\SemConv\Attributes\UrlAttributes;
+use OpenTelemetry\SemConv\Incubating\Attributes\HttpIncubatingAttributes;
+use Override;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
@@ -59,15 +63,16 @@ use PHPUnit\Framework\TestCase;
  *
  * @see \OpenTelemetry\Contrib\Instrumentation\Magento2\Magento2Instrumentation
  */
-class HttpTest extends TestCase
+final class HttpTest extends TestCase
 {
     private ScopeInterface $scope;
+    /** @var ArrayObject<array-key, mixed> */
     private ArrayObject $storage;
 
-    private $objectManager;
+    private object $objectManager;
 
     /**
-     * @var ResponseHttp|MockObject
+     * @var ResponseHttp&MockObject
      */
     private $responseMock;
 
@@ -77,41 +82,42 @@ class HttpTest extends TestCase
     private $http;
 
     /**
-     * @var FrontControllerInterface|MockObject
+     * @var FrontControllerInterface&MockObject
      */
     private $frontControllerMock;
 
     /**
-     * @var Manager|MockObject
+     * @var Manager&MockObject
      */
     private $eventManagerMock;
 
     /**
-     * @var RequestHttp|MockObject
+     * @var RequestHttp&MockObject
      */
     private $requestMock;
 
     /**
-     * @var ObjectManagerInterface|MockObject
+     * @var ObjectManagerInterface&MockObject
      */
     private $objectManagerMock;
 
     /**
-     * @var AreaList|MockObject
+     * @var AreaList&MockObject
      */
     private $areaListMock;
 
     /**
-     * @var ConfigLoader|MockObject
+     * @var ConfigLoader&MockObject
      */
     private $configLoaderMock;
 
     /**
-     * @var ExceptionHandlerInterface|MockObject
+     * @var ExceptionHandlerInterface&MockObject
      */
     private $exceptionHandlerMock;
 
-    public function setUp(): void
+    #[Override]
+    protected function setUp(): void
     {
         $this->storage = new ArrayObject();
         $tracerProvider = new TracerProvider(
@@ -124,6 +130,7 @@ class HttpTest extends TestCase
             ->withTracerProvider($tracerProvider)
             ->activate();
 
+        /** @psalm-suppress DeprecatedClass */
         $this->objectManager = new HelperObjectManager($this);
         $objects = [
             [
@@ -168,9 +175,6 @@ class HttpTest extends TestCase
             ->getMock();
         $this->objectManagerMock = $this->createMock(ObjectManagerInterface::class);
         $this->responseMock = $this->createMock(ResponseHttp::class);
-
-        // $this->frontController = new FrontController();
-
         $this->frontControllerMock = $this->createMock(FrontControllerInterface::class);
         $this->eventManagerMock = $this->getMockBuilder(Manager::class)
             ->disableOriginalConstructor()
@@ -178,7 +182,8 @@ class HttpTest extends TestCase
             ->getMock();
         $this->exceptionHandlerMock = $this->createMock(ExceptionHandlerInterface::class);
 
-        $this->http = $this->objectManager->getObject(
+        /** @var AppHttp $http */
+        $http = $this->objectManager->getObject(
             AppHttp::class,
             [
                 'objectManager' => $this->objectManagerMock,
@@ -190,9 +195,11 @@ class HttpTest extends TestCase
                 'exceptionHandler' => $this->exceptionHandlerMock,
             ]
         );
+        $this->http = $http;
     }
 
-    public function tearDown(): void
+    #[Override]
+    protected function tearDown(): void
     {
         $this->scope->detach();
     }
@@ -256,13 +263,13 @@ class HttpTest extends TestCase
      *     (http.response.status_code=200, body_size=4, response_size=6)
      *   - contains the three response headers k1/k2/k3 with their values
      */
-    public function test_launch()
+    public function test_launch(): void
     {
         $this->setUpLaunch();
         $this->requestMock->expects($this->once())
             ->method('isHead')
             ->willReturn(false);
-        $this->responseMock->expects($this->once())
+        $this->responseMock->expects($this->exactly(2))
             ->method('getStatusCode')
             ->willReturn(200);
         $this->responseMock->expects($this->once())
@@ -308,30 +315,30 @@ class HttpTest extends TestCase
         $this->assertNotEmpty($attributes[CodeAttributes::CODE_LINE_NUMBER]);
 
         // --- request attributes (values are environment-derived; assert presence and type) ---
-        $this->assertArrayHasKey(TraceAttributes::URL_FULL, $attributes);
-        $this->assertIsString($attributes[TraceAttributes::URL_FULL]);
-        $this->assertArrayHasKey(TraceAttributes::URL_SCHEME, $attributes);
-        $this->assertArrayHasKey(TraceAttributes::URL_PATH, $attributes);
-        $this->assertArrayHasKey(TraceAttributes::HTTP_REQUEST_METHOD, $attributes);
-        $this->assertArrayHasKey(TraceAttributes::NETWORK_PROTOCOL_VERSION, $attributes);
-        $this->assertArrayHasKey(TraceAttributes::SERVER_ADDRESS, $attributes);
-        $this->assertArrayHasKey(TraceAttributes::SERVER_PORT, $attributes);
+        $this->assertArrayHasKey(UrlAttributes::URL_FULL, $attributes);
+        $this->assertIsString($attributes[UrlAttributes::URL_FULL]);
+        $this->assertArrayHasKey(UrlAttributes::URL_SCHEME, $attributes);
+        $this->assertArrayHasKey(UrlAttributes::URL_PATH, $attributes);
+        $this->assertArrayHasKey(HttpAttributes::HTTP_REQUEST_METHOD, $attributes);
+        $this->assertArrayHasKey(NetworkAttributes::NETWORK_PROTOCOL_VERSION, $attributes);
+        $this->assertArrayHasKey(ServerAttributes::SERVER_ADDRESS, $attributes);
+        $this->assertArrayHasKey(ServerAttributes::SERVER_PORT, $attributes);
 
         // --- response attributes (values are controlled by the mock) ---
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_STATUS_CODE, $attributes);
-        $this->assertSame(200, $attributes[TraceAttributes::HTTP_RESPONSE_STATUS_CODE]);
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_BODY_SIZE, $attributes);
-        $this->assertSame(4, $attributes[TraceAttributes::HTTP_RESPONSE_BODY_SIZE]);
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_SIZE, $attributes);
-        $this->assertSame(6, $attributes[TraceAttributes::HTTP_RESPONSE_SIZE]);
+        $this->assertArrayHasKey(HttpAttributes::HTTP_RESPONSE_STATUS_CODE, $attributes);
+        $this->assertSame(200, $attributes[HttpAttributes::HTTP_RESPONSE_STATUS_CODE]);
+        $this->assertArrayHasKey(HttpIncubatingAttributes::HTTP_RESPONSE_BODY_SIZE, $attributes);
+        $this->assertSame(4, $attributes[HttpIncubatingAttributes::HTTP_RESPONSE_BODY_SIZE]);
+        $this->assertArrayHasKey(HttpIncubatingAttributes::HTTP_RESPONSE_SIZE, $attributes);
+        $this->assertSame(6, $attributes[HttpIncubatingAttributes::HTTP_RESPONSE_SIZE]);
 
         // --- response headers ---
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.k1', $attributes);
-        $this->assertSame('v1', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.k1']);
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.k2', $attributes);
-        $this->assertSame('v2', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.k2']);
-        $this->assertArrayHasKey(TraceAttributes::HTTP_RESPONSE_HEADER . '.k3', $attributes);
-        $this->assertSame('v3', $attributes[TraceAttributes::HTTP_RESPONSE_HEADER . '.k3']);
+        $this->assertArrayHasKey(HttpAttributes::HTTP_RESPONSE_HEADER . '.k1', $attributes);
+        $this->assertSame('v1', $attributes[HttpAttributes::HTTP_RESPONSE_HEADER . '.k1']);
+        $this->assertArrayHasKey(HttpAttributes::HTTP_RESPONSE_HEADER . '.k2', $attributes);
+        $this->assertSame('v2', $attributes[HttpAttributes::HTTP_RESPONSE_HEADER . '.k2']);
+        $this->assertArrayHasKey(HttpAttributes::HTTP_RESPONSE_HEADER . '.k3', $attributes);
+        $this->assertSame('v3', $attributes[HttpAttributes::HTTP_RESPONSE_HEADER . '.k3']);
     }
 
     /**
@@ -356,7 +363,9 @@ class HttpTest extends TestCase
         $this->expectExceptionMessage('Message');
 
         $this->setUpLaunchDependencies();
-        $this->frontControllerMock->expects($this->once())
+        /** @var FrontControllerInterface&MockObject $frontControllerMock */
+        $frontControllerMock = $this->frontControllerMock;
+        $frontControllerMock->expects($this->once())
             ->method('dispatch')
             ->with($this->requestMock)
             ->willThrowException(new \Exception('Message'));

@@ -11,7 +11,6 @@ use Magento\Framework\App\Bootstrap;
 use Magento\Framework\App\FrontController;
 use Magento\Framework\App\Http;
 use Magento\Framework\App\Request\Http as HttpRequest;
-
 use Magento\Framework\App\Response\Http as HttpResponse;
 use Magento\Framework\App\ResponseInterface;
 use Magento\Framework\Controller\ResultInterface;
@@ -27,12 +26,16 @@ use OpenTelemetry\Context\Context;
 use function OpenTelemetry\Instrumentation\hook;
 use OpenTelemetry\SDK\Trace\ReadableSpanInterface;
 use OpenTelemetry\SemConv\Attributes\CodeAttributes;
-use OpenTelemetry\SemConv\TraceAttributes;
+use OpenTelemetry\SemConv\Attributes\ErrorAttributes;
+use OpenTelemetry\SemConv\Attributes\HttpAttributes;
+use OpenTelemetry\SemConv\Attributes\NetworkAttributes;
+use OpenTelemetry\SemConv\Attributes\ServerAttributes;
+use OpenTelemetry\SemConv\Attributes\UrlAttributes;
+use OpenTelemetry\SemConv\Attributes\UserAgentAttributes;
+use OpenTelemetry\SemConv\Incubating\Attributes\HttpIncubatingAttributes;
 use Psr\Http\Message\ServerRequestInterface;
 use Throwable;
 
-// @phan-file-suppress PhanUndeclaredClassReference
-// @phan-file-suppress PhanUndeclaredTypeParameter
 final class Magento2Instrumentation
 {
     use LogsMessagesTrait;
@@ -41,8 +44,8 @@ final class Magento2Instrumentation
 
     public static function register(): void
     {
-        /** @var \OpenTelemetry\API\Metrics\HistogramInterface|null */
-        static $histogram;
+        /** @var \OpenTelemetry\API\Metrics\HistogramInterface|null $histogram */
+        static $histogram = null;
 
         $instrumentation = new CachedInstrumentation(
             'io.opentelemetry.contrib.php.magento2',
@@ -91,18 +94,19 @@ final class Magento2Instrumentation
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
-                    ->setAttribute(TraceAttributes::URL_FULL, (string) $request->getUri())
-                    ->setAttribute(TraceAttributes::URL_SCHEME, $request->getUri()->getScheme())
-                    ->setAttribute(TraceAttributes::URL_PATH, $request->getUri()->getPath())
-                    ->setAttribute(TraceAttributes::HTTP_REQUEST_METHOD, $request->getMethod())
-                    ->setAttribute(TraceAttributes::NETWORK_PROTOCOL_VERSION, $request->getProtocolVersion())
-                    ->setAttribute(TraceAttributes::USER_AGENT_ORIGINAL, $request->getHeaderLine('User-Agent'))
-                    ->setAttribute(TraceAttributes::HTTP_REQUEST_BODY_SIZE, $request->getHeaderLine('Content-Length'))
-                    ->setAttribute(TraceAttributes::SERVER_ADDRESS, $request->getUri()->getHost())
-                    ->setAttribute(TraceAttributes::SERVER_PORT, $request->getUri()->getPort() ?? ($request->getUri()->getScheme() === 'https' ? 443 : 80));
+                    ->setAttribute(UrlAttributes::URL_FULL, (string) $request->getUri())
+                    ->setAttribute(UrlAttributes::URL_SCHEME, $request->getUri()->getScheme())
+                    ->setAttribute(UrlAttributes::URL_PATH, $request->getUri()->getPath())
+                    ->setAttribute(HttpAttributes::HTTP_REQUEST_METHOD, $request->getMethod())
+                    ->setAttribute(NetworkAttributes::NETWORK_PROTOCOL_VERSION, $request->getProtocolVersion())
+                    ->setAttribute(UserAgentAttributes::USER_AGENT_ORIGINAL, $request->getHeaderLine('User-Agent'))
+                    ->setAttribute(HttpIncubatingAttributes::HTTP_REQUEST_BODY_SIZE, $request->getHeaderLine('Content-Length'))
+                    ->setAttribute(ServerAttributes::SERVER_ADDRESS, $request->getUri()->getHost())
+                    ->setAttribute(ServerAttributes::SERVER_PORT, $request->getUri()->getPort() ?? ($request->getUri()->getScheme() === 'https' ? 443 : 80));
 
+                /** @psalm-suppress MixedAssignment */
                 foreach ($request->getHeaders() as $key => $value) {
-                    $spanBuilder->setAttribute(TraceAttributes::HTTP_REQUEST_HEADER . '.' . $key, implode(',', $value));
+                    $spanBuilder->setAttribute(HttpAttributes::HTTP_REQUEST_HEADER . '.' . $key, implode(',', $value));
                 }
 
                 $span = $spanBuilder->startSpan();
@@ -122,20 +126,22 @@ final class Magento2Instrumentation
                 if ($exception) {
                     $span->recordException($exception);
                     $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
-                    $responseMeta[TraceAttributes::ERROR_TYPE] = (string) $exception->getCode();
+                    $responseMeta[ErrorAttributes::ERROR_TYPE] = (string) $exception->getCode();
                 }
                 if ($response instanceof HttpResponse) {
-                    $span->setAttribute(TraceAttributes::HTTP_RESPONSE_BODY_SIZE, strlen($response->getBody()));
+                    $span->setAttribute(HttpIncubatingAttributes::HTTP_RESPONSE_BODY_SIZE, strlen($response->getBody()));
+                    /** @psalm-suppress MixedAssignment */
                     foreach ($response->getHeaders()->toArray() as $key => $value) {
-                        $span->setAttribute(TraceAttributes::HTTP_RESPONSE_HEADER . '.' . $key, $value);
+                        $span->setAttribute(HttpAttributes::HTTP_RESPONSE_HEADER . '.' . $key, (string) $value);
                     }
-                    $span->setAttribute(TraceAttributes::HTTP_RESPONSE_SIZE, strlen($response->toString()));
-                    $span->setAttribute(TraceAttributes::HTTP_RESPONSE_STATUS_CODE, $response->getStatusCode());
-                    $responseMeta[TraceAttributes::HTTP_RESPONSE_STATUS_CODE] = $span->getAttribute(TraceAttributes::HTTP_RESPONSE_STATUS_CODE);
+                    $span->setAttribute(HttpIncubatingAttributes::HTTP_RESPONSE_SIZE, strlen($response->toString()));
+                    $span->setAttribute(HttpAttributes::HTTP_RESPONSE_STATUS_CODE, $response->getStatusCode());
+                    $responseMeta[HttpAttributes::HTTP_RESPONSE_STATUS_CODE] = $response->getStatusCode();
                     $prop = Globals::responsePropagator();
-                    $prop->inject($response, ResponsePropagationSetter::instance(), $scope->context());
+                    $prop->inject($response, ResponsePropagationSetter::getInstance(), $scope->context());
                 }
                 //https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#http-server
+                /** @psalm-suppress MixedAssignment */
                 $histogram ??= $instrumentation->meter()->createHistogram(
                     'http.server.request.duration',
                     's',
@@ -144,21 +150,20 @@ final class Magento2Instrumentation
                 );
                 if ($span instanceof ReadableSpanInterface) {
                     $spanAttrs = [
-                        TraceAttributes::HTTP_REQUEST_METHOD => $span->getAttribute(TraceAttributes::HTTP_REQUEST_METHOD),
-                        TraceAttributes::URL_SCHEME => $span->getAttribute(TraceAttributes::URL_SCHEME),
-                        TraceAttributes::NETWORK_PROTOCOL_VERSION => $span->getAttribute(TraceAttributes::NETWORK_PROTOCOL_VERSION),
+                        HttpAttributes::HTTP_REQUEST_METHOD => $span->getAttribute(HttpAttributes::HTTP_REQUEST_METHOD),
+                        UrlAttributes::URL_SCHEME => $span->getAttribute(UrlAttributes::URL_SCHEME),
+                        NetworkAttributes::NETWORK_PROTOCOL_VERSION => $span->getAttribute(NetworkAttributes::NETWORK_PROTOCOL_VERSION),
                     ];
+                    /** @psalm-suppress PossiblyInvalidArgument */
                     $histogram->record($span->getDuration() / ClockInterface::NANOS_PER_SECOND, array_merge($spanAttrs, $responseMeta));
                 }
                 $span->end();
             }
         );
 
-        /** @psalm-suppress UndefinedClass */
         hook(
             FrontController::class,
             'dispatch',
-            /** @psalm-suppress UndefinedClass */
             pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $span = $instrumentation->tracer()
                     ->spanBuilder('FrontController.dispatch')
@@ -168,7 +173,6 @@ final class Magento2Instrumentation
                     ->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
-            /** @psalm-suppress UndefinedClass */
             post: static function (FrontController $frontController, array $params, ResponseInterface|ResultInterface|null $response, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
@@ -184,19 +188,24 @@ final class Magento2Instrumentation
             }
         );
 
+        /** @psalm-suppress DeprecatedClass */
         hook(
             Action::class,
             'dispatch',
+            /** @psalm-suppress DeprecatedClass */
             pre: static function (Action $action, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $request = $params[0] instanceof HttpRequest ? $params[0] : null;
+                /** @var non-empty-string $actionName */
+                $actionName = $request?->getFullActionName() ?? 'unknown';
                 $span = $instrumentation->tracer()
-                    ->spanBuilder($request?->getFullActionName() ?? 'unknown')
+                    ->spanBuilder($actionName)
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
                     ->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
+            /** @psalm-suppress DeprecatedClass */
             post: static function (Action $action, array $params, ResponseInterface|ResultInterface|null $response, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
@@ -242,6 +251,11 @@ final class Magento2Instrumentation
 
     private static function getScriptNameFromRequest(ServerRequestInterface $request): string
     {
-        return $request->getServerParams()['SCRIPT_NAME'] ?? '/';
+        $scriptName = $request->getServerParams()['SCRIPT_NAME'] ?? '/';
+        if (!is_string($scriptName) || $scriptName === '') {
+            return '/';
+        }
+
+        return $scriptName;
     }
 }

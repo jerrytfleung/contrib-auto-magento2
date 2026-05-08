@@ -18,6 +18,7 @@ use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
 use OpenTelemetry\SDK\Trace\TracerProvider;
 use OpenTelemetry\SemConv\Attributes\CodeAttributes;
 use OpenTelemetry\SemConv\Attributes\ExceptionAttributes;
+use Override;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
@@ -37,10 +38,6 @@ use PHPUnit\Framework\TestCase;
  *   - Records any exception thrown during dispatch and sets span status to ERROR
  *   - Ends the span unconditionally
  *
- * Why NOT Forward/AbstractAction:
- *   Forward extends AbstractAction, NOT Action. The OTel hook fires for the class
- *   where the method is defined; using Forward would never trigger Action::dispatch.
- *
  * Property injection via reflection:
  *   Action::dispatch accesses $this->_response and $this->_actionFlag. Because the
  *   constructor is disabled to skip complex dependency setup, injectProperty() walks
@@ -54,12 +51,16 @@ use PHPUnit\Framework\TestCase;
  *
  * @see \OpenTelemetry\Contrib\Instrumentation\Magento2\Magento2Instrumentation
  */
-class ActionTest extends TestCase
+final class ActionTest extends TestCase
 {
     private ScopeInterface $scope;
+    /** @var ArrayObject<array-key, mixed> */
     private ArrayObject $storage;
 
-    /** @var Action&MockObject */
+    /**
+     * @psalm-suppress DeprecatedClass
+     * @var Action&MockObject
+     */
     private Action $action;
 
     /** @var HttpRequest&MockObject */
@@ -71,6 +72,7 @@ class ActionTest extends TestCase
     /** @var ActionFlag&MockObject */
     private ActionFlag $actionFlag;
 
+    #[Override]
     protected function setUp(): void
     {
         $this->storage = new ArrayObject();
@@ -93,6 +95,7 @@ class ActionTest extends TestCase
         $this->actionFlag = $this->createMock(ActionFlag::class);
 
         // Concrete subclass of the abstract Action class; execute() is auto-stubbed.
+        /** @psalm-suppress DeprecatedClass */
         /** @var Action&MockObject $action */
         $action = $this->getMockBuilder(Action::class)
             ->disableOriginalConstructor()
@@ -105,6 +108,7 @@ class ActionTest extends TestCase
         $this->action = $action;
     }
 
+    #[Override]
     protected function tearDown(): void
     {
         $this->scope->detach();
@@ -140,6 +144,7 @@ class ActionTest extends TestCase
         $this->assertCount(1, $this->storage, 'Expected exactly one span to be exported.');
         $span = $this->storage[0];
         $this->assertInstanceOf(ImmutableSpan::class, $span);
+
         return $span;
     }
 
@@ -263,4 +268,3 @@ class ActionTest extends TestCase
         }
     }
 }
-

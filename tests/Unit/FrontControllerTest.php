@@ -12,7 +12,6 @@ use Magento\Framework\App\Area;
 use Magento\Framework\App\AreaInterface;
 use Magento\Framework\App\AreaList;
 use Magento\Framework\App\FrontController;
-use Magento\Framework\App\Request\InvalidRequestException;
 use Magento\Framework\App\Request\ValidatorInterface;
 use Magento\Framework\App\RequestInterface;
 use Magento\Framework\App\Response\Http;
@@ -33,6 +32,7 @@ use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
 use OpenTelemetry\SDK\Trace\TracerProvider;
 use OpenTelemetry\SemConv\Attributes\CodeAttributes;
 use OpenTelemetry\SemConv\Attributes\ExceptionAttributes;
+use Override;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -54,71 +54,36 @@ use Psr\Log\LoggerInterface;
  *     FrontController.dispatch ends second; findSpanByName() is used to locate the outer span
  *   - NotFoundException path (noroute):    1+ spans; FrontController.dispatch span present
  *
- * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
  * @see \OpenTelemetry\Contrib\Instrumentation\Magento2\Magento2Instrumentation
  */
-class FrontControllerTest extends TestCase
+final class FrontControllerTest extends TestCase
 {
     private ScopeInterface $scope;
+    /** @var ArrayObject<array-key, mixed> */
     private ArrayObject $storage;
-    /**
-     * @var FrontController
-     */
-    protected $model;
+    protected FrontController $model;
+    /** @var RequestInterface&MockObject */
+    protected RequestInterface $request;
+    /** @var RouterList&MockObject */
+    protected RouterList $routerList;
+    /** @var RouterInterface&MockObject */
+    protected RouterInterface $router;
+    /** @var Http&MockObject */
+    protected Http $response;
+    /** @var ValidatorInterface&MockObject */
+    private ValidatorInterface $requestValidator;
+    /** @var MessageManager&MockObject */
+    private MessageManager $messages;
+    /** @var LoggerInterface&MockObject */
+    private LoggerInterface $logger;
+    /** @var AreaList&MockObject */
+    private AreaList $areaListMock;
+    /** @var State&MockObject */
+    private State $appStateMock;
+    /** @var AreaInterface&MockObject */
+    private AreaInterface $areaMock;
 
-    /**
-     * @var MockObject
-     */
-    protected $request;
-
-    /**
-     * @var MockObject
-     */
-    protected $routerList;
-
-    /**
-     * @var MockObject
-     */
-    protected $router;
-
-    /**
-     * @var MockObject|Http
-     */
-    protected $response;
-
-    /**
-     * @var MockObject|ValidatorInterface
-     */
-    private $requestValidator;
-
-    /**
-     * @var MockObject|MessageManager
-     */
-    private $messages;
-
-    /**
-     * @var MockObject|LoggerInterface
-     */
-    private $logger;
-
-    /**
-     * @var MockObject|AreaList
-     */
-    private $areaListMock;
-
-    /**
-     * @var MockObject|State
-     */
-    private $appStateMock;
-
-    /**
-     * @var MockObject|AreaInterface
-     */
-    private $areaMock;
-
-    /**
-     * @inheritDoc
-     */
+    #[Override]
     protected function setUp(): void
     {
         $this->storage = new ArrayObject();
@@ -165,7 +130,8 @@ class FrontControllerTest extends TestCase
         );
     }
 
-    public function tearDown(): void
+    #[Override]
+    protected function tearDown(): void
     {
         $this->scope->detach();
     }
@@ -189,11 +155,12 @@ class FrontControllerTest extends TestCase
      */
     public function testDispatchThrowException(): void
     {
-        $this->expectException('LogicException');
+        $this->expectException(\LogicException::class);
         $this->expectExceptionMessage('Front controller reached 100 router match iterations');
         $validCounter = 0;
-        $callbackValid = function () use (&$validCounter) {
+        $callbackValid = static function () use (&$validCounter): bool {
             $validCounter++;
+
             return $validCounter % 10 ? false : true;
         };
         $this->routerList->expects($this->any())->method('valid')->willReturnCallback($callbackValid);
@@ -240,80 +207,6 @@ class FrontControllerTest extends TestCase
         }
     }
 
-//    /**
-//     * Check adding validation failure message to debug log.
-//     *
-//     * @return void
-//     */
-//    public function testAddingValidationFailureMessageToDebugLog(): void
-//    {
-//        $exceptionMessage = 'exception_message';
-//        $exception = new InvalidRequestException($exceptionMessage);
-//
-//        $this->appStateMock->expects($this->any())->method('getAreaCode')->willReturn('frontend');
-//        $this->areaMock
-//            ->method('load')
-//            ->willReturnCallback(
-//                function ($arg) {
-//                    if ($arg == Area::PART_DESIGN || $arg == Area::PART_TRANSLATE) {
-//                        return $this->areaMock;
-//                    }
-//                }
-//            );
-//        $this->areaListMock->expects($this->any())->method('getArea')->willReturn($this->areaMock);
-//        $this->routerList->expects($this->any())
-//            ->method('valid')
-//            ->willReturn(true);
-//
-//        $response = $this->createMock(Http::class);
-//        $controllerInstance = $this->getMockBuilder(Action::class)
-//            ->disableOriginalConstructor()
-//            ->getMock();
-//        $controllerInstance->expects($this->any())
-//            ->method('dispatch')
-//            ->with($this->request)
-//            ->willReturn($response);
-//        $this->router
-//            ->method('match')
-//            ->willReturnCallback(
-//                function ($arg1) use ($controllerInstance) {
-//                    static $callCount = 0;
-//                    if ($callCount == 0 && $arg1 == $this->request) {
-//                        $callCount++;
-//                        return false;
-//                    } elseif ($callCount == 1 && $arg1 == $this->request) {
-//                        $callCount++;
-//                        return $controllerInstance;
-//                    }
-//                }
-//            );
-//
-//        $this->routerList->expects($this->any())
-//            ->method('current')
-//            ->willReturn($this->router);
-//
-//        $this->request
-//            ->method('isDispatched')
-//            ->willReturnOnConsecutiveCalls(false, true);
-//        $this->request
-//            ->method('setDispatched')
-//            ->willReturnCallback(
-//                function ($arg1) {
-//                    return null;
-//                }
-//            );
-//
-//        $this->requestValidator->expects($this->once())
-//            ->method('validate')->with($this->request, $controllerInstance)->willThrowException($exception);
-//        $this->logger->expects($this->once())->method('debug')->with(
-//            'Request validation failed for action "'
-//            . get_class($controllerInstance) . '"',
-//            ["exception" => $exception]
-//        );
-//
-//        $this->assertEquals($exceptionMessage, $this->model->dispatch($this->request));
-//    }
-
     /**
      * @test Happy path: FrontController::dispatch successfully routes to a Forward controller.
      *
@@ -336,6 +229,7 @@ class FrontControllerTest extends TestCase
             ->willReturn(true);
 
         $response = $this->createMock(Http::class);
+        /** @psalm-suppress DeprecatedClass */
         $controllerInstance = $this->getMockBuilder(Action::class)
             ->disableOriginalConstructor()
             ->getMock();
@@ -344,29 +238,20 @@ class FrontControllerTest extends TestCase
             ->with($this->request)
             ->willReturn($response);
 
+        /** @psalm-suppress DeprecatedClass */
         $objectManager = new ObjectManager($this);
         $controller = $objectManager->getObject(
             Forward::class,
             [
                 'request' => $this->request,
-                'response' => $this->response
+                'response' => $this->response,
             ]
         );
 
         $this->router
             ->method('match')
-            ->willReturnCallback(
-                function ($arg1) use ($controllerInstance, $controller) {
-                    static $callCount = 0;
-                    if ($callCount == 0 && $arg1 == $this->request) {
-                        $callCount++;
-                        return false;
-                    } elseif ($callCount == 1 && $arg1 == $this->request) {
-                        $callCount++;
-                        return $controller;
-                    }
-                }
-            );
+            ->with($this->request)
+            ->willReturnOnConsecutiveCalls(false, $controller);
 
         $this->routerList->expects($this->any())
             ->method('current')
@@ -375,21 +260,21 @@ class FrontControllerTest extends TestCase
         $this->areaMock
             ->method('load')
             ->willReturnCallback(
-                function ($arg1) {
-                    if ($arg1 == Area::PART_DESIGN) {
-                        return $this->areaMock;
-                    } elseif ($arg1 == Area::PART_TRANSLATE) {
+                function (string $arg1): ?AreaInterface {
+                    if ($arg1 === Area::PART_DESIGN) {
                         return $this->areaMock;
                     }
+                    if ($arg1 === Area::PART_TRANSLATE) {
+                        return $this->areaMock;
+                    }
+
+                    return null;
                 }
             );
         $this->areaListMock->expects($this->any())->method('getArea')->willReturn($this->areaMock);
         $this->request
             ->method('isDispatched')
             ->willReturnOnConsecutiveCalls(false, true);
-//        $this->request
-//            ->method('setDispatched')
-//            ->with(true);
 
         $this->assertEquals($response, $this->model->dispatch($this->request));
 
@@ -427,6 +312,7 @@ class FrontControllerTest extends TestCase
             ->willReturn(true);
 
         $response = $this->createMock(Http::class);
+        /** @psalm-suppress DeprecatedClass */
         $controllerInstance = $this->getMockBuilder(Action::class)
             ->disableOriginalConstructor()
             ->getMock();
@@ -434,18 +320,19 @@ class FrontControllerTest extends TestCase
             ->method('dispatch')
             ->with($this->request)
             ->willReturn($response);
+        $shouldThrow = true;
         $this->router
             ->method('match')
             ->willReturnCallback(
-                function ($arg1) use ($controllerInstance) {
-                    static $callCount = 0;
-                    if ($callCount == 0 && $arg1 == $this->request) {
-                        $callCount++;
+                /** @psalm-suppress RedundantCondition */
+                function (RequestInterface $arg1) use (&$shouldThrow, $controllerInstance): object {
+                    if ($arg1 === $this->request && $shouldThrow) {
+                        $shouldThrow = false;
+
                         throw new NotFoundException(new Phrase('Page not found.'));
-                    } elseif ($callCount == 1 && $arg1 == $this->request) {
-                        $callCount++;
-                        return $controllerInstance;
                     }
+
+                    return $controllerInstance;
                 }
             );
 
@@ -457,12 +344,15 @@ class FrontControllerTest extends TestCase
         $this->areaMock
             ->method('load')
             ->willReturnCallback(
-                function ($arg1) {
-                    if ($arg1 == Area::PART_DESIGN) {
-                        return $this->areaMock;
-                    } elseif ($arg1 == Area::PART_TRANSLATE) {
+                function (string $arg1): ?AreaInterface {
+                    if ($arg1 === Area::PART_DESIGN) {
                         return $this->areaMock;
                     }
+                    if ($arg1 === Area::PART_TRANSLATE) {
+                        return $this->areaMock;
+                    }
+
+                    return null;
                 }
             );
         $this->areaListMock->expects($this->any())->method('getArea')->willReturn($this->areaMock);
@@ -472,11 +362,7 @@ class FrontControllerTest extends TestCase
         $this->request
             ->method('setDispatched')
             ->willReturnCallback(
-                function ($arg) {
-                    if ($arg == false || $arg == true) {
-                        return null;
-                    }
-                }
+                static fn (bool $arg): ?RequestInterface => null
             );
         $this->request
             ->method('setActionName')
@@ -495,6 +381,7 @@ class FrontControllerTest extends TestCase
      */
     private function findSpanByName(string $name): ?ImmutableSpan
     {
+        /** @psalm-suppress MixedAssignment */
         foreach ($this->storage as $span) {
             if ($span instanceof ImmutableSpan && $span->getName() === $name) {
                 return $span;
@@ -504,4 +391,3 @@ class FrontControllerTest extends TestCase
         return null;
     }
 }
-
