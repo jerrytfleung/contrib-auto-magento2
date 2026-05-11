@@ -309,7 +309,7 @@ final class Magento2Instrumentation
                     ->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
-            post: static function (Template $template, array $params, string $html, ?Throwable $exception) {
+            post: static function (Template $template, array $params, ?string $html, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
@@ -336,7 +336,7 @@ final class Magento2Instrumentation
                     ->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
-            post: static function (View $view, array $params, View $returnView, ?Throwable $exception) {
+            post: static function (View $view, array $params, ?View $returnView, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
