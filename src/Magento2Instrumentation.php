@@ -14,6 +14,8 @@ use Magento\Framework\App\Request\Http as HttpRequest;
 use Magento\Framework\App\Response\Http as HttpResponse;
 use Magento\Framework\App\ResponseInterface;
 use Magento\Framework\Controller\ResultInterface;
+use Magento\Framework\Event\InvokerInterface;
+use Magento\Framework\Event\Observer;
 use Nyholm\Psr7Server\ServerRequestCreator;
 use OpenTelemetry\API\Behavior\LogsMessagesTrait;
 use OpenTelemetry\API\Common\Time\Clock;
@@ -228,7 +230,7 @@ final class Magento2Instrumentation
                     ->startSpan();
                 Context::storage()->attach($span->storeInContext(Context::getCurrent()));
             },
-            post: static function (ActionInterface $action, array $params, ResponseInterface|ResultInterface|null $response, ?Throwable $exception) {
+            post: static function (ActionInterface $actionInterface, array $params, ResponseInterface|ResultInterface|null $response, ?Throwable $exception) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
@@ -239,6 +241,30 @@ final class Magento2Instrumentation
                     $span->recordException($exception);
                     $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
                 }
+                $span->end();
+            }
+        );
+
+        hook(
+            InvokerInterface::class,
+            'dispatch',
+            pre: static function (InvokerInterface $invokerInterface, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+                $configuration = is_array($params[0]) ? $params[0] : [];
+                $span = $instrumentation->tracer()
+                    ->spanBuilder('OBSERVER: ' . $configuration['name'] ?? 'unknown')
+                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
+                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
+                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
+                    ->startSpan();
+                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
+            },
+            post: static function (InvokerInterface $invokerInterface, array $params) {
+                $scope = Context::storage()->scope();
+                if (!$scope) {
+                    return;
+                }
+                $scope->detach();
+                $span = Span::fromContext($scope->context());
                 $span->end();
             }
         );
