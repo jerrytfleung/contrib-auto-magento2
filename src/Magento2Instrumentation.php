@@ -17,6 +17,7 @@ use Magento\Framework\Controller\ResultInterface;
 use Magento\Framework\Event\InvokerInterface;
 use Magento\Framework\Event\Observer;
 use Magento\Framework\Event\Manager;
+use Magento\Framework\View\Element\Template;
 use Nyholm\Psr7Server\ServerRequestCreator;
 use OpenTelemetry\API\Behavior\LogsMessagesTrait;
 use OpenTelemetry\API\Common\Time\Clock;
@@ -290,6 +291,34 @@ final class Magento2Instrumentation
                 }
                 $scope->detach();
                 $span = Span::fromContext($scope->context());
+                $span->end();
+            }
+        );
+
+        hook(
+            Template::class,
+            'fetchView',
+            pre: static function (Template $template, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+                $filename = is_string($params[0]) ? $params[0] : null;
+                $span = $instrumentation->tracer()
+                    ->spanBuilder('TEMPLATE: ' . $filename ?? 'unknown')
+                    ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
+                    ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
+                    ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
+                    ->startSpan();
+                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
+            },
+            post: static function (Template $template, array $params, string $html, ?Throwable $exception) {
+                $scope = Context::storage()->scope();
+                if (!$scope) {
+                    return;
+                }
+                $scope->detach();
+                $span = Span::fromContext($scope->context());
+                if ($exception) {
+                    $span->recordException($exception);
+                    $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
+                }
                 $span->end();
             }
         );
