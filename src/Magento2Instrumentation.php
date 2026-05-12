@@ -16,7 +16,6 @@ use Magento\Framework\App\ResponseInterface;
 use Magento\Framework\App\View;
 use Magento\Framework\Controller\ResultInterface;
 use Magento\Framework\Event\InvokerInterface;
-use Magento\Framework\Event\Observer;
 use Magento\Framework\Event\Manager;
 use Magento\Framework\View\Element\Template;
 use Nyholm\Psr7Server\ServerRequestCreator;
@@ -252,9 +251,9 @@ final class Magento2Instrumentation
             Manager::class,
             'dispatch',
             pre: static function (Manager $manager, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $eventName = is_string($params[0]) ? $params[0] : null;
+                $eventName = (string) ($params[0]);
                 $span = $instrumentation->tracer()
-                    ->spanBuilder('EVENT: ' . $eventName ?? 'unknown')
+                    ->spanBuilder('EVENT: ' . $eventName)
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
@@ -277,8 +276,11 @@ final class Magento2Instrumentation
             'dispatch',
             pre: static function (InvokerInterface $invokerInterface, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $configuration = is_array($params[0]) ? $params[0] : [];
+                $observerName = (isset($configuration['name']) && is_string($configuration['name']) && $configuration['name'] !== '')
+                    ? $configuration['name']
+                    : 'unknown';
                 $span = $instrumentation->tracer()
-                    ->spanBuilder('OBSERVER: ' . $configuration['name'] ?? 'unknown')
+                    ->spanBuilder('OBSERVER: ' . $observerName)
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
@@ -302,7 +304,7 @@ final class Magento2Instrumentation
             pre: static function (Template $template, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $filename = is_string($params[0]) ? $params[0] : null;
                 $span = $instrumentation->tracer()
-                    ->spanBuilder('TEMPLATE: ' . $filename ?? 'unknown')
+                    ->spanBuilder('TEMPLATE: ' . ($filename ?? 'unknown'))
                     ->setAttribute(CodeAttributes::CODE_FUNCTION_NAME, sprintf('%s::%s', $class, $function))
                     ->setAttribute(CodeAttributes::CODE_FILE_PATH, $filename)
                     ->setAttribute(CodeAttributes::CODE_LINE_NUMBER, $lineno)
