@@ -184,9 +184,6 @@ final class Magento2Instrumentation
             'dispatch',
             pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $request = $params[0] instanceof HttpRequest ? $params[0] : null;
-                if ($request) {
-                    LocalRootSpan::current()->updateName($request->getRouteName());
-                }
                 $span = $instrumentation->tracer()
                     ->spanBuilder('frontController.dispatch')
                     ->setSpanKind(SpanKind::KIND_INTERNAL)
@@ -220,6 +217,7 @@ final class Magento2Instrumentation
                 $request = $params[0] instanceof HttpRequest ? $params[0] : null;
                 /** @var non-empty-string $actionName */
                 $actionName = $request?->getFullActionName() ?? 'unknown';
+                LocalRootSpan::current()->updateName($request->getRouteName());
                 $span = $instrumentation->tracer()
                     ->spanBuilder('action.dispatch ' . $actionName)
                     ->setSpanKind(SpanKind::KIND_INTERNAL)
