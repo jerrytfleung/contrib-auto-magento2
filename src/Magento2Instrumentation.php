@@ -216,7 +216,10 @@ final class Magento2Instrumentation
                 $request = $params[0] instanceof HttpRequest ? $params[0] : null;
                 /** @var non-empty-string $actionName */
                 $actionName = $request?->getFullActionName() ?? 'unknown';
-                LocalRootSpan::current()->updateName($request->getRouteName());
+                if ($request->getRouteName()) {
+                    // Update local root span name
+                    LocalRootSpan::current()->updateName(sprintf('%s %s', $request->getMethod(), $request->getRouteName()));
+                }
                 $span = $instrumentation->tracer()
                     ->spanBuilder('action.dispatch ' . $actionName)
                     ->setSpanKind(SpanKind::KIND_INTERNAL)
