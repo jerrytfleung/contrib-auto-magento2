@@ -183,7 +183,6 @@ final class Magento2Instrumentation
             FrontController::class,
             'dispatch',
             pre: static function (FrontController $frontController, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                $request = $params[0] instanceof HttpRequest ? $params[0] : null;
                 $span = $instrumentation->tracer()
                     ->spanBuilder('frontController.dispatch')
                     ->setSpanKind(SpanKind::KIND_INTERNAL)
